@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import secrets
 import sqlite3
 from database import DB_PATH, init_db
-from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi import Depends, FastAPI, Form, HTTPException, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
 import pandas as pd
@@ -12,7 +12,6 @@ app = FastAPI(title="Intelligent E-Commerce Analytics API")
 # 1. Start the Fridge
 init_db()
 
-# Secret stamp used by the kitchen to sign JWT wristbands
 JWT_SECRET = "my-super-secret-kitchen-stamp-2026"
 JWT_ALGORITHM = "HS256"
 
@@ -84,7 +83,6 @@ def verify_jwt_bearer(
     )
   token = credentials.credentials
   try:
-    # Check the secret stamp and expiration time on the wristband
     payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     return payload
   except jwt.ExpiredSignatureError:
@@ -99,7 +97,22 @@ def verify_jwt_bearer(
     )
 
 
-# Helper function to calculate RFM for any tenant_id
+# ==========================================
+# GUARD #5 & #6: OAuth 2.0 (Auth Code + Client Credentials)
+# ==========================================
+# Temporary 1-time paper tickets for Guard #5 (Authorization Code Flow)
+AUTH_CODES = {}
+
+# Robot accounts for Guard #6 (Client Credentials Flow between Microservices)
+OAUTH_CLIENTS = {
+    "analytics-robot": {
+        "client_secret": "robot-secret-999",
+        "service_name": "analytics-service -> ml-service",
+        "scopes": ["ml:predict"],
+    }
+}
+
+
 def calculate_rfm_for_tenant(tenant_id: str):
   conn = sqlite3.connect(DB_PATH)
   df = pd.read_sql_query(
@@ -129,7 +142,7 @@ def say_hello():
   return {"message": "Hello from the kitchen!"}
 
 
-# Endpoint 1: Protected by API Key
+# 1. API Key Protected Endpoint
 @app.get("/rfm")
 def get_rfm_api_key(store: dict = Security(verify_api_key)):
   return {
@@ -140,15 +153,15 @@ def get_rfm_api_key(store: dict = Security(verify_api_key)):
   }
 
 
-# Endpoint 2: Ticket Booth! Protected by Basic Auth -> Issues a JWT Wristband
+# 2. Basic Auth Login -> Issues JWT
 @app.post("/login-basic")
 def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
-  # Write user info + store tenant_id onto the JWT wristband
   payload = {
       "sub": user["username"],
       "tenant_id": user["tenant_id"],
       "store_name": user["store_name"],
       "scopes": user["scopes"],
+      "auth_flow": "Basic Auth",
       "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
   }
   token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -160,13 +173,133 @@ def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
   }
 
 
-# Endpoint 3: Protected by Bearer Token + JWT Wristband
+# 3 & 4. Bearer JWT Protected Endpoint
 @app.get("/rfm-jwt")
 def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
+  if "tenant_id" not in claims:
+    raise HTTPException(
+        status_code=403, detail="This token does not belong to a store user!"
+    )
   return {
-      "auth_method": "Bearer JWT Token",
+      "auth_method": f"Bearer JWT ({claims.get('auth_flow', 'JWT')})",
       "logged_in_user": claims["sub"],
       "tenant_id": claims["tenant_id"],
       "store_name": claims["store_name"],
       "customers": calculate_rfm_for_tenant(claims["tenant_id"]),
+  }
+
+
+# 5A. OAuth2 Authorization Code Flow - Step 1: Get 1-Time Authorization Code
+@app.post("/oauth/authorize")
+def oauth_authorize(username: str = Form(...), password: str = Form(...)):
+  user = USERS_DB.get(username)
+  if not user or user["password"] != password:
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Guard #5 (OAuth Auth Code): Invalid user credentials at login"
+            " screen!"
+        ),
+    )
+  # Create a 1-time secret code
+  code = f"authcode_{secrets.token_hex(8)}"
+  AUTH_CODES[code] = {"username": username, **user}
+  return {
+      "message": "Step 1 complete! Trade this 1-time code at /oauth/token.",
+      "authorization_code": code,
+  }
+
+
+# 5B & 6. OAuth2 Token Endpoint (Handles BOTH Authorization Code & Client Credentials!)
+@app.post("/oauth/token")
+def oauth_token(
+    grant_type: str = Form(...),
+    code: str = Form(None),
+    client_id: str = Form(None),
+    client_secret: str = Form(None),
+):
+  # Guard #5: OAuth Authorization Code Flow
+  if grant_type == "authorization_code":
+    if not code or code not in AUTH_CODES:
+      raise HTTPException(
+          status_code=401,
+          detail=(
+              "Guard #5 (OAuth Auth Code): Invalid or already-used"
+              " authorization_code!"
+          ),
+      )
+    # Pop the code so it can NEVER be used a second time!
+    user = AUTH_CODES.pop(code)
+    payload = {
+        "sub": user["username"],
+        "tenant_id": user["tenant_id"],
+        "store_name": user["store_name"],
+        "scopes": user["scopes"],
+        "auth_flow": "OAuth2 Authorization Code Flow",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {
+        "access_token": token,
+        "token_type": "Bearer",
+        "decoded_claims": payload,
+    }
+
+  # Guard #6: OAuth Client Credentials Flow (Machine-to-Machine)
+  elif grant_type == "client_credentials":
+    client = OAUTH_CLIENTS.get(client_id)
+    if not client or client["client_secret"] != client_secret:
+      raise HTTPException(
+          status_code=401,
+          detail=(
+              "Guard #6 (OAuth Client Credentials): Invalid client_id or"
+              " client_secret!"
+          ),
+      )
+    payload = {
+        "sub": client_id,
+        "service": client["service_name"],
+        "scopes": client["scopes"],
+        "auth_flow": "OAuth2 Client Credentials Flow",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
+    }
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {
+        "access_token": token,
+        "token_type": "Bearer",
+        "decoded_claims": payload,
+    }
+
+  else:
+    raise HTTPException(
+        status_code=400, detail="Unsupported OAuth2 grant_type!"
+    )
+
+
+# 6B. ML Service Endpoint: Churn Prediction (Protected by OAuth Client Credentials JWT with scope 'ml:predict')
+@app.get("/ml/churn")
+def predict_churn(
+    tenant_id: str = "store_a", claims: dict = Security(verify_jwt_bearer)
+):
+  if "ml:predict" not in claims.get("scopes", []):
+    raise HTTPException(
+        status_code=403,
+        detail="Guard #6 (ML Service): Forbidden! Token lacks 'ml:predict' robot scope!",
+    )
+  rfm_list = calculate_rfm_for_tenant(tenant_id)
+  for row in rfm_list:
+    # Simple rule-based + risk score for demo: if Recency > 30 days, High Churn Risk!
+    row["Churn_Probability"] = (
+        round(min(0.95, row["Recency"] / 100), 2)
+        if row["Recency"] > 10
+        else 0.08
+    )
+    row["Churn_Status"] = (
+        "⚠️ High Risk" if row["Recency"] > 30 else "✅ Loyal / Safe"
+    )
+  return {
+      "called_by_robot": claims["sub"],
+      "auth_flow": claims.get("auth_flow"),
+      "tenant_id": tenant_id,
+      "predictions": rfm_list,
   }
