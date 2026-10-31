@@ -3,248 +3,255 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# Works on local laptop AND inside Docker/Kubernetes!
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
-st.set_page_config(page_title="E-Commerce Analytics", layout="wide")
-st.title("🛒 Intelligent E-Commerce Customer Behavior Analytics")
+st.set_page_config(page_title="Retailer Customer Intelligence", layout="wide")
 
-if "jwt_token" not in st.session_state:
-  st.session_state.jwt_token = ""
-if "auth_code" not in st.session_state:
-  st.session_state.auth_code = ""
-if "oauth_jwt" not in st.session_state:
-  st.session_state.oauth_jwt = ""
-if "m2m_jwt" not in st.session_state:
-  st.session_state.m2m_jwt = ""
-
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🔑 1. API Key",
-    "🎟️ 2-4. Basic + Bearer + JWT",
-    "🌐 5. OAuth2 Auth Code",
-    "🤖 6. OAuth2 Client Credentials (ML)",
-    "⚡ 7. Spark ETL & Hadoop Data Lake",
-])
-
-with tab1:
-  st.subheader("Guard #1: API Key Authentication (`X-API-Key`)")
-  selected_option = st.selectbox(
-      "Choose a Store Keycard to test:",
-      [
-          "Store A - Toy Kingdom (key-store-a-123)",
-          "Store B - Sneaker World (key-store-b-456)",
-          "Fake Hacker Key (wrong-key-999)",
-      ],
-  )
-  api_key = selected_option.split("(")[1].replace(")", "")
-  st.code(f"GET /rfm\nX-API-Key: {api_key}")
-
-  if st.button("Load Customers with API Key"):
-    response = requests.get(
-        f"{BACKEND_URL}/rfm", headers={"X-API-Key": api_key}
-    )
-    if response.status_code == 200:
-      data = response.json()
-      st.success(
-          f"✅ Access Granted via **{data['auth_method']}**! Store:"
-          f" **{data['store_name']}** (`{data['tenant_id']}`)"
-      )
-      df = pd.DataFrame(data["customers"])
-      st.dataframe(df, use_container_width=True)
-      st.bar_chart(df.set_index("CustomerID")["Monetary"])
-    else:
-      st.error(
-          f"🚨 HTTP {response.status_code}: {response.json().get('detail')}"
-      )
-
-with tab2:
-  col1, col2 = st.columns(2)
-  with col1:
-    st.subheader("Step 1: Ticket Booth (Guard #2: Basic Auth)")
-    username = st.text_input("Username", value="alice")
-    password = st.text_input("Password", value="passwordA", type="password")
-
-    if st.button("1️⃣ Log In with Basic Auth & Get JWT Wristband"):
-      res = requests.post(
-          f"{BACKEND_URL}/login-basic", auth=(username, password)
-      )
-      if res.status_code == 200:
-        data = res.json()
-        st.session_state.jwt_token = data["access_token"]
-        st.success(f"✅ {data['message']}")
-        st.json(data["decoded_claims"])
-      else:
-        st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
-
-  with col2:
-    st.subheader("Step 2: Enter the Kitchen (Guards #3 & #4: Bearer JWT)")
-    token_box = st.text_area(
-        "Your Bearer JWT Wristband:",
-        value=st.session_state.jwt_token,
-        height=120,
-    )
-    if st.button("2️⃣ Call /rfm-jwt with Bearer Wristband"):
-      res = requests.get(
-          f"{BACKEND_URL}/rfm-jwt",
-          headers={"Authorization": f"Bearer {token_box}"},
-      )
-      if res.status_code == 200:
-        data = res.json()
-        st.success(
-            f"✅ Wristband Valid! User: **{data['logged_in_user']}** | Store:"
-            f" **{data['store_name']}**"
-        )
-        df = pd.DataFrame(data["customers"])
-        st.dataframe(df, use_container_width=True)
-        st.bar_chart(df.set_index("CustomerID")["Monetary"])
-      else:
-        st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
-
-with tab3:
-  st.subheader("Guard #5: OAuth 2.0 Authorization Code Flow")
-  c1, c2, c3 = st.columns(3)
-  with c1:
-    st.markdown("#### Step 1: Get 1-Time Code")
-    oa_user = st.text_input("OAuth User", value="vikram")
-    oa_pass = st.text_input("OAuth Password", value="passwordB", type="password")
-    if st.button("1️⃣ Authorize & Get Code"):
-      res = requests.post(
-          f"{BACKEND_URL}/oauth/authorize",
-          data={"username": oa_user, "password": oa_pass},
-      )
-      if res.status_code == 200:
-        st.session_state.auth_code = res.json()["authorization_code"]
-        st.success(f"✅ Got 1-time code: `{st.session_state.auth_code}`")
-      else:
-        st.error(f"🚨 {res.json().get('detail')}")
-
-  with c2:
-    st.markdown("#### Step 2: Trade Code for JWT")
-    code_input = st.text_input(
-        "1-Time Authorization Code:", value=st.session_state.auth_code
-    )
-    if st.button("2️⃣ Exchange Code at /oauth/token"):
-      res = requests.post(
-          f"{BACKEND_URL}/oauth/token",
-          data={"grant_type": "authorization_code", "code": code_input},
-      )
-      if res.status_code == 200:
-        data = res.json()
-        st.session_state.oauth_jwt = data["access_token"]
-        st.success("✅ Exchanged code for OAuth JWT!")
-        st.json(data["decoded_claims"])
-      else:
-        st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
-
-  with c3:
-    st.markdown("#### Step 3: Load Store Data")
-    if st.button("3️⃣ Call /rfm-jwt with OAuth Token"):
-      res = requests.get(
-          f"{BACKEND_URL}/rfm-jwt",
-          headers={"Authorization": f"Bearer {st.session_state.oauth_jwt}"},
-      )
-      if res.status_code == 200:
-        data = res.json()
-        st.success(f"✅ Loaded **{data['store_name']}** via **{data['auth_method']}**!")
-        st.dataframe(pd.DataFrame(data["customers"]), use_container_width=True)
-      else:
-        st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
-
-with tab4:
-  st.subheader("Guard #6: OAuth 2.0 Client Credentials Flow (M2M)")
-  col_a, col_b = st.columns(2)
-  with col_a:
-    st.markdown("#### Step 1: Robot Authenticates")
-    client_id = st.text_input("Robot Client ID", value="analytics-robot")
-    client_secret = st.text_input(
-        "Robot Client Secret", value="robot-secret-999", type="password"
-    )
-    if st.button("1️⃣ Get Machine-to-Machine JWT"):
-      res = requests.post(
-          f"{BACKEND_URL}/oauth/token",
-          data={
-              "grant_type": "client_credentials",
-              "client_id": client_id,
-              "client_secret": client_secret,
-          },
-      )
-      if res.status_code == 200:
-        data = res.json()
-        st.session_state.m2m_jwt = data["access_token"]
-        st.success("✅ Robot authenticated! Scope `ml:predict` granted.")
-        st.json(data["decoded_claims"])
-      else:
-        st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
-
-  with col_b:
-    st.markdown("#### Step 2: Call ML Churn Service (`/ml/churn`)")
-    target_store = st.selectbox("Select Store to Predict Churn:", ["store_a", "store_b"])
-    if st.button("2️⃣ Run ML Churn Prediction"):
-      res = requests.get(
-          f"{BACKEND_URL}/ml/churn?tenant_id={target_store}",
-          headers={"Authorization": f"Bearer {st.session_state.m2m_jwt}"},
-      )
-      if res.status_code == 200:
-        data = res.json()
-        st.success(
-            f"✅ ML Service responded to **{data['called_by_robot']}** via"
-            f" **{data['auth_flow']}**!"
-        )
-        st.dataframe(pd.DataFrame(data["predictions"]), use_container_width=True)
-      else:
-        st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
+# Session state initialization
+for key in ["jwt_token", "auth_code", "oauth_jwt", "m2m_jwt"]:
+  if key not in st.session_state:
+    st.session_state[key] = ""
 
 # ==========================================
-# TAB 5: SPARK ETL & HADOOP DATA LAKE
+# SIDEBAR: RETAILER STORE SWITCHER & CSV UPLOAD
 # ==========================================
-with tab5:
-  st.subheader("⚡ Apache Spark ETL Pipeline & Hadoop Parquet Data Lake")
-  st.write(
-      "Upload a raw/dirty CSV file (or use the built-in dirty sample below) to"
-      " test **Extract → Transform (PySpark) → Load (HDFS Parquet + SQLite)**!"
-  )
+st.sidebar.title("🏪 Store Owner Portal")
+selected_store = st.sidebar.selectbox(
+    "Select Your Connected Store:",
+    [
+        "Toy Kingdom (key-store-a-123)",
+        "Sneaker World (key-store-b-456)",
+    ],
+)
+active_api_key = selected_store.split("(")[1].replace(")", "")
+st.sidebar.success(f"Connected with Key: `{active_api_key}`")
 
-  etl_key_option = st.selectbox(
-      "Select Store API Key for ETL Ingestion:",
-      ["key-store-a-123 (Store A)", "key-store-b-456 (Store B)"],
-  )
-  etl_api_key = etl_key_option.split(" ")[0]
-
-  sample_dirty_csv = """InvoiceNo,CustomerID,InvoiceDate,Quantity,UnitPrice
-550001,Ananya,2026-10-30,15,120.0
-550002,,2026-10-30,5,50.0
-550003,Ananya,2026-10-29,-3,120.0
-550004,Dev,2026-10-28,10,90.0
-550005,Meera,2026-10-25,8,0.0"""
-
-  st.markdown(
-      "**Sample Dirty CSV (includes missing CustomerID, negative Quantity"
-      " `-3`, and zero UnitPrice `0.0`):**"
-  )
-  csv_text = st.text_area("Raw CSV Data to Send to ETL:", value=sample_dirty_csv, height=150)
-
-  if st.button("🚀 Run Spark ETL & Save to Hadoop Parquet Data Lake"):
-    files = {"file": ("dirty_sales.csv", csv_text.encode("utf-8"), "text/csv")}
+st.sidebar.markdown("---")
+st.sidebar.subheader("📤 Upload New Store Sales (CSV)")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload your store's CSV file (InvoiceNo, CustomerID, InvoiceDate, Quantity, UnitPrice):",
+    type=["csv"],
+)
+if uploaded_file is not None:
+  if st.sidebar.button("⚡ Clean & Load via Spark ETL"):
+    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
     res = requests.post(
         f"{BACKEND_URL}/etl/upload",
-        headers={"X-API-Key": etl_api_key},
+        headers={"X-API-Key": active_api_key},
         files=files,
     )
     if res.status_code == 200:
-      data = res.json()
-      st.success(f"✅ {data['status']} using **{data['engine']}**!")
-      m1, m2, m3 = st.columns(3)
-      m1.metric("1. Extracted Raw Rows", data["extract_raw_rows"])
-      m2.metric(
-          "2. Dirty Rows Removed (Transform)",
-          data["transform_dirty_rows_removed"],
+      etl_info = res.json()
+      st.sidebar.success(
+          f"✅ Loaded {etl_info['load_clean_rows_saved']} clean orders! (Removed"
+          f" {etl_info['transform_dirty_rows_removed']} bad rows)"
       )
-      m3.metric("3. Clean Rows Loaded", data["load_clean_rows_saved"])
-      st.info(
-          "📦 **Hadoop Data Lake Partition Written:**"
-          f" `{data['hadoop_data_lake_path']}`"
-      )
-      st.json(data)
     else:
-      st.error(f"🚨 HTTP {res.status_code}: {res.text}")
-      
+      st.sidebar.error("Failed to upload CSV.")
+
+# ==========================================
+# MAIN PAGE HEADER
+# ==========================================
+st.title("📊 Intelligent E-Commerce Customer Behavior & Store Advisor")
+st.caption(
+    "Understand how your customers shop, who is about to leave, and exact"
+    " actions to grow your store revenue."
+)
+
+main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
+    "💡 1. Store Overview & Smart Reviews",
+    "👥 2. Customer Behavior & Action Plan",
+    "🛍️ 3. Product Bundle Recommendations",
+    "🔐 4. Security (6 Auth Flows) & Spark Big Data Lab",
+])
+
+# Fetch live insights for the selected store
+insights_res = requests.get(
+    f"{BACKEND_URL}/store-insights", headers={"X-API-Key": active_api_key}
+)
+insights = insights_res.json() if insights_res.status_code == 200 else None
+
+if insights:
+  df_cust = pd.DataFrame(insights["customer_behavior"])
+
+  # ==========================================
+  # TAB 1: STORE OVERVIEW & SMART REVIEWS
+  # ==========================================
+  with main_tab1:
+    st.subheader(f"🏪 Executive Summary for **{insights['store_name']}**")
+
+    # Top KPI Metric Cards
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("💰 Total Revenue", f"₹{insights['kpis']['total_revenue']:,.0f}")
+    k2.metric("👥 Total Customers", insights["kpis"]["total_customers"])
+    k3.metric("🛒 Avg Spend / Customer", f"₹{insights['kpis']['avg_spend']:,.0f}")
+    k4.metric("🏆 VIP Champions", insights["kpis"]["vip_count"])
+    k5.metric("⚠️ At-Risk Customers", insights["kpis"]["at_risk_count"])
+
+    st.markdown("### 🧠 Automated Store Reviews & Findings")
+    for review in insights["store_reviews"]:
+      st.info(review)
+
+    col_chart1, col_chart2 = st.columns(2)
+    with col_chart1:
+      st.markdown("#### 💵 Total Spend by Customer")
+      st.bar_chart(df_cust.set_index("CustomerID")["Total_Spent"])
+    with col_chart2:
+      st.markdown("#### 🔮 Predicted 6-Month Customer Lifetime Value (CLV)")
+      st.bar_chart(df_cust.set_index("CustomerID")["Predicted_6M_CLV"])
+
+  # ==========================================
+  # TAB 2: DEEP CUSTOMER BEHAVIOR & ACTION PLAN
+  # ==========================================
+  with main_tab2:
+    st.subheader("👥 Individual Customer Behavior Reviews & Next Best Actions")
+    st.write(
+        "Here is what each customer is doing in your store right now and"
+        " **what you should do next** to keep them buying:"
+    )
+
+    # Filter by segment
+    segments = ["All Segments"] + sorted(df_cust["Segment"].unique().tolist())
+    chosen_seg = st.selectbox("Filter Customers by Behavior Segment:", segments)
+
+    filtered_df = (
+        df_cust
+        if chosen_seg == "All Segments"
+        else df_cust[df_cust["Segment"] == chosen_seg]
+    )
+    st.dataframe(filtered_df, use_container_width=True)
+
+    st.markdown("### 🔍 Customer-by-Customer Behavior Cards")
+    for _, row in filtered_df.iterrows():
+      with st.expander(
+          f"{row['Segment']} — **{row['CustomerID']}** | Spent:"
+          f" ₹{row['Total_Spent']:,.0f} | Churn Risk: {row['Churn_Risk_%']}%"
+      ):
+        c_left, c_right = st.columns(2)
+        with c_left:
+          st.markdown(f"**📋 Behavior Understanding:**\n> {row['Behavior_Understanding']}")
+          st.markdown(
+              f"- **Last Visit:** {row['Recency_Days']} day(s) ago\n"
+              f"- **Total Orders:** {row['Orders']} orders (Avg ₹{row['Avg_Order_Value']:,.0f}/order)"
+          )
+        with c_right:
+          st.success(f"**🎯 Recommended Action for Store Owner:**\n\n{row['Recommended_Retailer_Action']}")
+          st.metric("Predicted 6-Month Value (CLV)", f"₹{row['Predicted_6M_CLV']:,.0f}")
+
+  # ==========================================
+  # TAB 3: PRODUCT RECOMMENDATIONS & FUNNEL
+  # ==========================================
+  with main_tab3:
+    st.subheader(f"🛍️ Smart Cross-Sell & Bundle Recommendations for {insights['store_name']}")
+    st.write(
+        "Based on customer shopping baskets, offer these combinations at"
+        " checkout to increase your store's Average Order Value:"
+    )
+    df_rec = pd.DataFrame(insights["product_recommendations"])
+    st.table(df_rec)
+
+    st.markdown("### 📉 Store Shopping Funnel Diagnosis")
+    funnel_df = pd.DataFrame({
+        "Stage": [
+            "1. Visited Store",
+            "2. Viewed Product",
+            "3. Added to Cart",
+            "4. Completed Purchase",
+        ],
+        "Shoppers": [1000, 620, 280, 145],
+    })
+    st.bar_chart(funnel_df.set_index("Stage")["Shoppers"])
+    st.warning(
+        "💡 **Funnel Review for Retailer:** **54% of shoppers** who add items"
+        " to their cart leave without paying (`280 -> 145`). **Fix:** Enable"
+        " 1-click UPI checkout and show free-shipping progress bars in the"
+        " cart!"
+    )
+
+# ==========================================
+# TAB 4: PROFESSOR'S 6 AUTH METHODS & SPARK ETL LAB
+# ==========================================
+with main_tab4:
+  st.subheader("🔐 Capstone Architecture Verification: 6 Auth Methods & Apache Spark ETL")
+  sub1, sub2, sub3, sub4 = st.tabs([
+      "1. API Key Isolation",
+      "2-4. Basic Auth + Bearer JWT",
+      "5. OAuth2 Auth Code",
+      "6. OAuth2 Client Credentials & Spark ETL",
+  ])
+
+  with sub1:
+    test_key = st.selectbox(
+        "Test Key:", ["key-store-a-123", "key-store-b-456", "wrong-hacker-key"]
+    )
+    if st.button("Test Guard #1 (API Key)"):
+      r = requests.get(f"{BACKEND_URL}/rfm", headers={"X-API-Key": test_key})
+      if r.status_code == 200:
+        st.success(f"200 OK — Isolated Tenant: {r.json()['tenant_id']}")
+        st.json(r.json())
+      else:
+        st.error(f"401 Blocked: {r.json().get('detail')}")
+
+  with sub2:
+    u = st.text_input("Basic Auth User", value="alice")
+    p = st.text_input("Basic Auth Pass", value="passwordA", type="password")
+    if st.button("Log In (Basic Auth) -> Issue JWT"):
+      r = requests.post(f"{BACKEND_URL}/login-basic", auth=(u, p))
+      if r.status_code == 200:
+        st.session_state.jwt_token = r.json()["access_token"]
+        st.success("Issued Bearer JWT Wristband!")
+        st.json(r.json()["decoded_claims"])
+      else:
+        st.error(r.text)
+    jwt_box = st.text_area("Bearer JWT:", value=st.session_state.jwt_token, height=80)
+    if st.button("Verify Bearer JWT at /rfm-jwt"):
+      r = requests.get(
+          f"{BACKEND_URL}/rfm-jwt",
+          headers={"Authorization": f"Bearer {jwt_box}"},
+      )
+      st.write(r.status_code, r.json())
+
+  with sub3:
+    if st.button("Step 1: Get 1-Time OAuth Authorization Code (vikram)"):
+      r = requests.post(
+          f"{BACKEND_URL}/oauth/authorize",
+          data={"username": "vikram", "password": "passwordB"},
+      )
+      st.session_state.auth_code = r.json().get("authorization_code", "")
+      st.success(f"Code: {st.session_state.auth_code}")
+    if st.button("Step 2: Exchange Code for JWT at /oauth/token"):
+      r = requests.post(
+          f"{BACKEND_URL}/oauth/token",
+          data={
+              "grant_type": "authorization_code",
+              "code": st.session_state.auth_code,
+          },
+      )
+      st.write(r.status_code, r.json())
+
+  with sub4:
+    if st.button("Run OAuth2 Client Credentials (M2M) -> Call /ml/churn"):
+      t = requests.post(
+          f"{BACKEND_URL}/oauth/token",
+          data={
+              "grant_type": "client_credentials",
+              "client_id": "analytics-robot",
+              "client_secret": "robot-secret-999",
+          },
+      ).json()["access_token"]
+      r = requests.get(
+          f"{BACKEND_URL}/ml/churn?tenant_id=store_a",
+          headers={"Authorization": f"Bearer {t}"},
+      )
+      st.success("Machine-to-Machine Churn Prediction Complete!")
+      st.dataframe(pd.DataFrame(r.json()["predictions"]))
+
+    sample_dirty = """InvoiceNo,CustomerID,InvoiceDate,Quantity,UnitPrice\n550001,Ananya,2026-10-30,15,120.0\n550002,,2026-10-30,5,50.0\n550003,Ananya,2026-10-29,-3,120.0"""
+    if st.button("Run Demo Spark ETL + Hadoop Parquet Load"):
+      files = {"file": ("dirty.csv", sample_dirty.encode("utf-8"), "text/csv")}
+      r = requests.post(
+          f"{BACKEND_URL}/etl/upload",
+          headers={"X-API-Key": active_api_key},
+          files=files,
+      )
+      st.json(r.json())
