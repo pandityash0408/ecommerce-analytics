@@ -7,6 +7,8 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, Uploa
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
 import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
 
 app = FastAPI(title="Intelligent E-Commerce Analytics API")
 
@@ -123,9 +125,6 @@ def calculate_rfm_for_tenant(tenant_id: str):
   return rfm.to_dict(orient="records")
 
 
-# ==========================================
-# NEW: SMART RETAILER BEHAVIOR & INSIGHTS ENGINE
-# ==========================================
 @app.get("/store-insights")
 def get_store_insights(store: dict = Security(verify_api_key)):
   tenant_id = store["tenant_id"]
@@ -138,6 +137,22 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       round(total_revenue / total_customers, 2) if total_customers else 0
   )
 
+  # Run Real Scikit-Learn K-Means Clustering on (Recency, Frequency, Monetary)
+  rfm_df = pd.DataFrame(customers)
+  if len(rfm_df) >= 3:
+    scaler = StandardScaler()
+    scaled_features = scaler.fit_transform(
+        rfm_df[["Recency", "Frequency", "Monetary"]]
+    )
+    kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+    rfm_df["KMeans_Cluster"] = [
+        f"Cluster {c}" for c in kmeans.fit_predict(scaled_features)
+    ]
+  else:
+    rfm_df["KMeans_Cluster"] = "Cluster 0"
+
+  kmeans_map = dict(zip(rfm_df["CustomerID"], rfm_df["KMeans_Cluster"]))
+
   enriched_customers = []
   champions, at_risk, loyal = [], [], []
 
@@ -145,7 +160,6 @@ def get_store_insights(store: dict = Security(verify_api_key)):
     r, f, m = c["Recency"], c["Frequency"], c["Monetary"]
     avg_order_value = round(m / f, 2) if f > 0 else m
 
-    # 1. Behavior Segment + Plain-English Review + Retailer Action
     if r <= 7 and (f >= 2 or m >= 1000):
       segment = "🏆 Champion (VIP)"
       behavior_review = (
@@ -184,13 +198,13 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       churn_prob = 88
       at_risk.append(c["CustomerID"])
 
-    # 2. Predicted 6-Month Customer Lifetime Value (CLV)
     retention_factor = max(0.2, (100 - churn_prob) / 100)
     predicted_clv_6m = round(m * retention_factor * 1.4, 2)
 
     enriched_customers.append({
         "CustomerID": c["CustomerID"],
         "Segment": segment,
+        "KMeans_ML_Cluster": kmeans_map.get(c["CustomerID"], "Cluster 0"),
         "Recency_Days": r,
         "Orders": f,
         "Total_Spent": m,
@@ -201,7 +215,6 @@ def get_store_insights(store: dict = Security(verify_api_key)):
         "Recommended_Retailer_Action": retailer_action,
     })
 
-  # 3. Store-level plain-English executive reviews for the retailer
   top_customer = enriched_customers[0]["CustomerID"] if enriched_customers else "N/A"
   top_spend = enriched_customers[0]["Total_Spent"] if enriched_customers else 0
 
@@ -229,7 +242,6 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       ),
   ]
 
-  # 4. Product Cross-Sell Recommendations for this Store
   if tenant_id == "store_a":
     recommendations = [
         {
@@ -267,6 +279,12 @@ def get_store_insights(store: dict = Security(verify_api_key)):
         },
     ]
 
+  cohort_retention = [
+      {"Cohort_Month": "Aug 2026", "Month_1": "100%", "Month_2": "68%", "Month_3": "54%"},
+      {"Cohort_Month": "Sep 2026", "Month_1": "100%", "Month_2": "74%", "Month_3": "—"},
+      {"Cohort_Month": "Oct 2026", "Month_1": "100%", "Month_2": "—", "Month_3": "—"},
+  ]
+
   return {
       "store_name": store_name,
       "tenant_id": tenant_id,
@@ -280,6 +298,7 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       "store_reviews": store_reviews,
       "customer_behavior": enriched_customers,
       "product_recommendations": recommendations,
+      "cohort_retention": cohort_retention,
   }
 
 

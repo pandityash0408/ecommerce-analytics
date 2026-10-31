@@ -6,3 +6,4 @@ python-multipart
 pyarrow
 pytest
 httpx
+scikit-learn
