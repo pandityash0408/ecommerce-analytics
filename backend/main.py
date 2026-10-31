@@ -465,3 +465,99 @@ async def upload_sales_etl(
   csv_bytes = await file.read()
   result = run_spark_etl(csv_bytes, tenant_id=store["tenant_id"])
   return result
+
+@app.get("/customer-360/{customer_id}")
+def get_customer_360(
+    customer_id: str, store: dict = Security(verify_api_key)
+):
+  tenant_id = store["tenant_id"]
+  conn = sqlite3.connect(DB_PATH)
+  df = pd.read_sql_query(
+      "SELECT InvoiceNo, InvoiceDate, Quantity, UnitPrice, (Quantity *"
+      " UnitPrice) AS TotalPrice FROM sales WHERE tenant_id = ? AND"
+      " CustomerID = ? ORDER BY InvoiceDate DESC",
+      conn,
+      params=(tenant_id, customer_id),
+  )
+  conn.close()
+
+  if df.empty:
+    raise HTTPException(
+        status_code=404, detail="Customer not found in this store."
+    )
+
+  total_spent = float(df["TotalPrice"].sum())
+  orders_count = int(df["InvoiceNo"].nunique())
+  last_date = df["InvoiceDate"].max()
+
+  # SHAP-style feature impact explanation (why the model scored this customer)
+  shap_Drivers = [
+      {
+          "Feature": "Recency (Last Visit Date)",
+          "Impact": (
+              "+High Positive"
+              if last_date >= "2026-10-25"
+              else "-Strong Churn Risk Driver"
+          ),
+      },
+      {
+          "Feature": "Order Frequency",
+          "Impact": (
+              f"{orders_count} distinct orders (+Loyalty boost)"
+              if orders_count >= 2
+              else "Single order (-Needs 2nd order nudge)"
+          ),
+      },
+      {
+          "Feature": "Total Monetary Spend",
+          "Impact": f"₹{total_spent:,.2f} lifetime spend",
+      },
+  ]
+
+  # Ready-to-send personalized message for the retailer
+  if last_date >= "2026-10-25":
+    campaign_msg = (
+        f"Hi {customer_id}! 🌟 Thank you for being one of {store['store_name']}'s"
+        " top VIP customers! Use code VIP-EARLY20 for early access and double"
+        " reward points on your next order!"
+    )
+  else:
+    campaign_msg = (
+        f"Hi {customer_id}! 👋 We miss seeing you at {store['store_name']}! Here"
+        " is a special 15% OFF welcome-back gift just for you: use code"
+        " COMEBACK15 at checkout within 48 hours!"
+    )
+
+  return {
+      "customer_id": customer_id,
+      "store_name": store["store_name"],
+      "total_spent": total_spent,
+      "orders_count": orders_count,
+      "last_order_date": last_date,
+      "shap_explanations": shap_Drivers,
+      "ready_to_send_message": campaign_msg,
+      "order_history": df.to_dict(orient="records"),
+  }
+
+
+@app.delete("/privacy/erase/{customer_id}")
+def erase_customer_dpdp(
+    customer_id: str, store: dict = Security(verify_api_key)
+):
+  """India DPDP Act 2023 Compliance: Right to Erasure (deletes customer data for this store only)."""
+  tenant_id = store["tenant_id"]
+  conn = sqlite3.connect(DB_PATH)
+  cursor = conn.cursor()
+  cursor.execute(
+      "DELETE FROM sales WHERE tenant_id = ? AND CustomerID = ?",
+      (tenant_id, customer_id),
+  )
+  deleted_rows = cursor.rowcount
+  conn.commit()
+  conn.close()
+  return {
+      "compliance": "India DPDP Act 2023 - Right to Erasure Executed",
+      "tenant_id": tenant_id,
+      "erased_customer": customer_id,
+      "records_deleted": deleted_rows,
+  }

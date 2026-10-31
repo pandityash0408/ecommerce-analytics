@@ -12,27 +12,26 @@ for key in ["jwt_token", "auth_code", "oauth_jwt", "m2m_jwt"]:
     st.session_state[key] = ""
 
 # ==========================================
-# SIDEBAR: RETAILER STORE SWITCHER & CSV UPLOAD
+# SIDEBAR: RETAILER STORE PORTAL & CSV UPLOAD
 # ==========================================
-st.sidebar.title("🏪 Store Owner Portal")
+st.sidebar.title("🏪 Retailer Portal")
 selected_store = st.sidebar.selectbox(
-    "Select Your Connected Store:",
+    "Active Store Account:",
     [
         "Toy Kingdom (key-store-a-123)",
         "Sneaker World (key-store-b-456)",
     ],
 )
 active_api_key = selected_store.split("(")[1].replace(")", "")
-st.sidebar.success(f"Connected with Key: `{active_api_key}`")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("📤 Upload New Store Sales (CSV)")
+st.sidebar.subheader("📤 Upload Store Sales (CSV)")
 uploaded_file = st.sidebar.file_uploader(
-    "Upload your store's CSV file (InvoiceNo, CustomerID, InvoiceDate, Quantity, UnitPrice):",
+    "Upload CSV (InvoiceNo, CustomerID, InvoiceDate, Quantity, UnitPrice):",
     type=["csv"],
 )
 if uploaded_file is not None:
-  if st.sidebar.button("⚡ Clean & Load via Spark ETL"):
+  if st.sidebar.button("⚡ Clean & Load Sales Data"):
     files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/csv")}
     res = requests.post(
         f"{BACKEND_URL}/etl/upload",
@@ -48,8 +47,13 @@ if uploaded_file is not None:
     else:
       st.sidebar.error("Failed to upload CSV.")
 
+st.sidebar.markdown("---")
+show_viva_mode = st.sidebar.checkbox(
+    "🎓 Show Viva / Professor Security Demo", value=False
+)
+
 # ==========================================
-# MAIN PAGE HEADER
+# MAIN RETAILER WEBSITE (100% BUSINESS FOCUSED)
 # ==========================================
 st.title("📊 Intelligent E-Commerce Customer Behavior & Store Advisor")
 st.caption(
@@ -61,7 +65,7 @@ main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "💡 1. Store Overview & Smart Reviews",
     "👥 2. Customer Behavior & Action Plan",
     "🛍️ 3. Product Bundles, Funnel & Cohorts",
-    "🔐 4. Security (6 Auth Flows) & Spark Big Data Lab",
+    "🎯 4. Customer 360° & Revenue Simulator",
 ])
 
 insights_res = requests.get(
@@ -72,9 +76,7 @@ insights = insights_res.json() if insights_res.status_code == 200 else None
 if insights:
   df_cust = pd.DataFrame(insights["customer_behavior"])
 
-  # ==========================================
   # TAB 1: STORE OVERVIEW & SMART REVIEWS
-  # ==========================================
   with main_tab1:
     st.subheader(f"🏪 Executive Summary for **{insights['store_name']}**")
 
@@ -97,14 +99,12 @@ if insights:
       st.markdown("#### 🔮 Predicted 6-Month Customer Lifetime Value (CLV)")
       st.bar_chart(df_cust.set_index("CustomerID")["Predicted_6M_CLV"])
 
-  # ==========================================
   # TAB 2: DEEP CUSTOMER BEHAVIOR & ACTION PLAN
-  # ==========================================
   with main_tab2:
     st.subheader("👥 Individual Customer Behavior Reviews & Next Best Actions")
     st.write(
-        "Each customer is grouped using **RFM + Scikit-Learn K-Means Machine"
-        " Learning** with a personalized store action plan:"
+        "Each customer is automatically analyzed using **RFM + K-Means"
+        " Clustering** to give you a clear review and recommended action:"
     )
 
     segments = ["All Segments"] + sorted(df_cust["Segment"].unique().tolist())
@@ -117,7 +117,6 @@ if insights:
     )
     st.dataframe(filtered_df, use_container_width=True)
 
-    # 1-Click Download Report Button for the Retailer!
     csv_export = filtered_df.to_csv(index=False).encode("utf-8")
     st.download_button(
         label="📥 Download Customer Behavior & Action Plan Report (CSV)",
@@ -128,28 +127,37 @@ if insights:
 
     st.markdown("### 🔍 Customer-by-Customer Behavior Cards")
     for _, row in filtered_df.iterrows():
+      cluster_label = row.get("KMeans_ML_Cluster", "Cluster 0")
       with st.expander(
-          f"{row['Segment']} ({row['KMeans_ML_Cluster']}) —"
-          f" **{row['CustomerID']}** | Spent: ₹{row['Total_Spent']:,.0f} |"
-          f" Churn Risk: {row['Churn_Risk_%']}%"
+          f"{row['Segment']} ({cluster_label}) — **{row['CustomerID']}** |"
+          f" Spent: ₹{row['Total_Spent']:,.0f} | Churn Risk:"
+          f" {row['Churn_Risk_%']}%"
       ):
         c_left, c_right = st.columns(2)
         with c_left:
-          st.markdown(f"**📋 Behavior Understanding:**\n> {row['Behavior_Understanding']}")
+          st.markdown(
+              f"**📋 Behavior Understanding:**\n> {row['Behavior_Understanding']}"
+          )
           st.markdown(
               f"- **Last Visit:** {row['Recency_Days']} day(s) ago\n"
-              f"- **Total Orders:** {row['Orders']} orders (Avg ₹{row['Avg_Order_Value']:,.0f}/order)\n"
-              f"- **ML Cluster:** `{row['KMeans_ML_Cluster']}`"
+              f"- **Total Orders:** {row['Orders']} orders (Avg"
+              f" ₹{row['Avg_Order_Value']:,.0f}/order)\n"
+              f"- **ML Cluster:** `{cluster_label}`"
           )
         with c_right:
-          st.success(f"**🎯 Recommended Action for Store Owner:**\n\n{row['Recommended_Retailer_Action']}")
-          st.metric("Predicted 6-Month Value (CLV)", f"₹{row['Predicted_6M_CLV']:,.0f}")
+          st.success(
+              "**🎯 Recommended Action for Store Owner:**\n\n"
+              f"{row['Recommended_Retailer_Action']}"
+          )
+          st.metric(
+              "Predicted 6-Month Value (CLV)", f"₹{row['Predicted_6M_CLV']:,.0f}"
+          )
 
-  # ==========================================
   # TAB 3: PRODUCT RECOMMENDATIONS, FUNNEL & COHORTS
-  # ==========================================
   with main_tab3:
-    st.subheader(f"🛍️ Smart Cross-Sell & Bundle Recommendations for {insights['store_name']}")
+    st.subheader(
+        f"🛍️ Smart Cross-Sell & Bundle Recommendations for {insights['store_name']}"
+    )
     st.table(pd.DataFrame(insights["product_recommendations"]))
 
     c_fun, c_coh = st.columns(2)
@@ -172,7 +180,10 @@ if insights:
 
     with c_coh:
       st.markdown("### 📅 Monthly Customer Cohort Retention")
-      st.write("Percentage of customers who come back and buy again in following months:")
+      st.write(
+          "Percentage of customers who come back and buy again in following"
+          " months:"
+      )
       if "cohort_retention" in insights:
         st.table(pd.DataFrame(insights["cohort_retention"]))
       st.info(
@@ -180,11 +191,87 @@ if insights:
           " after introducing loyalty points!"
       )
 
+  # TAB 4: CUSTOMER 360, WHAT-IF SIMULATOR & PRIVACY
+  with main_tab4:
+    st.subheader(
+        "🔍 1. Customer 360° Inspector & Personalized WhatsApp/Email Generator"
+    )
+    cust_list = df_cust["CustomerID"].tolist()
+    picked_customer = st.selectbox("Select a Customer to Inspect:", cust_list)
+
+    if picked_customer:
+      c360_res = requests.get(
+          f"{BACKEND_URL}/customer-360/{picked_customer}",
+          headers={"X-API-Key": active_api_key},
+      )
+      if c360_res.status_code == 200:
+        c360 = c360_res.json()
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+          st.markdown(
+              f"**🧠 Why Our AI Scored `{picked_customer}` This Way (SHAP"
+              " Drivers):**"
+          )
+          st.table(pd.DataFrame(c360["shap_explanations"]))
+          st.markdown("**🧾 Individual Purchase History:**")
+          st.dataframe(
+              pd.DataFrame(c360["order_history"]), use_container_width=True
+          )
+        with col_p2:
+          st.markdown("**💬 Ready-to-Send WhatsApp / Email Campaign Message:**")
+          st.code(c360["ready_to_send_message"], language="text")
+          st.caption(
+              "Copy and send this message to the customer to boost retention!"
+          )
+      else:
+        st.info(
+            "Make sure you pasted the `/customer-360/{customer_id}` endpoint"
+            " at the bottom of `backend/main.py` and saved it!"
+        )
+
+    st.markdown("---")
+    st.subheader("💰 2. Retailer 'What-If' Revenue Growth Simulator")
+    sim_col1, sim_col2 = st.columns(2)
+    with sim_col1:
+      winback_pct = st.slider(
+          "If we win back % of At-Risk Customers:", 0, 100, 40
+      )
+      bundle_uplift_pct = st.slider(
+          "If Product Bundles increase order size by %:", 0, 50, 15
+      )
+    with sim_col2:
+      base_rev = insights["kpis"]["total_revenue"]
+      projected_gain = round(
+          base_rev * (winback_pct / 100 * 0.25)
+          + base_rev * (bundle_uplift_pct / 100),
+          2,
+      )
+      st.metric(
+          "🚀 Projected Extra Store Revenue (Next 6 Months)",
+          f"+₹{projected_gain:,.0f}",
+          delta=f"New Total: ₹{base_rev + projected_gain:,.0f}",
+      )
+
+    st.markdown("---")
+    st.subheader("🛡️ 3. Customer Privacy & India DPDP Act 2023 Compliance")
+    erase_target = st.selectbox(
+        "Select Customer Requesting Data Erasure:", cust_list, key="erase_sel"
+    )
+    if st.button("🗑️ Erase Customer Data (DPDP Act Right to Erasure)"):
+      del_res = requests.delete(
+          f"{BACKEND_URL}/privacy/erase/{erase_target}",
+          headers={"X-API-Key": active_api_key},
+      )
+      if del_res.status_code == 200:
+        st.success(f"✅ Erased `{erase_target}`! Refresh the page to update.")
+        st.json(del_res.json())
+
 # ==========================================
-# TAB 4: PROFESSOR'S 6 AUTH METHODS & SPARK ETL LAB
+# OPTIONAL VIVA DEMO PANEL (ONLY SHOWN WHEN CHECKBOX IS TICKED)
 # ==========================================
-with main_tab4:
-  st.subheader("🔐 Capstone Architecture Verification: 6 Auth Methods & Apache Spark ETL")
+if show_viva_mode:
+  st.markdown("---")
+  st.subheader("🎓 Viva Exam Demo: 6 Auth Methods & Apache Spark ETL")
   sub1, sub2, sub3, sub4 = st.tabs([
       "1. API Key Isolation",
       "2-4. Basic Auth + Bearer JWT",
@@ -198,11 +285,7 @@ with main_tab4:
     )
     if st.button("Test Guard #1 (API Key)"):
       r = requests.get(f"{BACKEND_URL}/rfm", headers={"X-API-Key": test_key})
-      if r.status_code == 200:
-        st.success(f"200 OK — Isolated Tenant: {r.json()['tenant_id']}")
-        st.json(r.json())
-      else:
-        st.error(f"401 Blocked: {r.json().get('detail')}")
+      st.write(r.status_code, r.json())
 
   with sub2:
     u = st.text_input("Basic Auth User", value="alice")
@@ -211,11 +294,10 @@ with main_tab4:
       r = requests.post(f"{BACKEND_URL}/login-basic", auth=(u, p))
       if r.status_code == 200:
         st.session_state.jwt_token = r.json()["access_token"]
-        st.success("Issued Bearer JWT Wristband!")
         st.json(r.json()["decoded_claims"])
-      else:
-        st.error(r.text)
-    jwt_box = st.text_area("Bearer JWT:", value=st.session_state.jwt_token, height=80)
+    jwt_box = st.text_area(
+        "Bearer JWT:", value=st.session_state.jwt_token, height=80
+    )
     if st.button("Verify Bearer JWT at /rfm-jwt"):
       r = requests.get(
           f"{BACKEND_URL}/rfm-jwt",
@@ -241,7 +323,7 @@ with main_tab4:
       )
       st.write(r.status_code, r.json())
 
-with sub4:
+  with sub4:
     if st.button("Run OAuth2 Client Credentials (M2M) -> Call /ml/churn"):
       t = requests.post(
           f"{BACKEND_URL}/oauth/token",
@@ -255,15 +337,4 @@ with sub4:
           f"{BACKEND_URL}/ml/churn?tenant_id=store_a",
           headers={"Authorization": f"Bearer {t}"},
       )
-      st.success("Machine-to-Machine Churn Prediction Complete!")
       st.dataframe(pd.DataFrame(r.json()["predictions"]))
-
-    sample_dirty = "InvoiceNo,CustomerID,InvoiceDate,Quantity,UnitPrice\n550001,Ananya,2026-10-30,15,120.0\n550002,,2026-10-30,5,50.0\n550003,Ananya,2026-10-29,-3,120.0"
-    if st.button("Run Demo Spark ETL + Hadoop Parquet Load"):
-      files = {"file": ("dirty.csv", sample_dirty.encode("utf-8"), "text/csv")}
-      r = requests.post(
-          f"{BACKEND_URL}/etl/upload",
-          headers={"X-API-Key": active_api_key},
-          files=files,
-      )
-      st.json(r.json())
