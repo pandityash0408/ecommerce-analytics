@@ -12,6 +12,18 @@ from sklearn.preprocessing import StandardScaler
 
 app = FastAPI(title="Intelligent E-Commerce Analytics API")
 
+from security_shield import (
+    CyberArmorMiddleware,
+    SECURITY_AUDIT_LOG,
+    log_security_event,
+    sanitize_identifier,
+    verify_hashed_secret,
+    hash_secret,
+)
+
+# Activate OWASP Security Headers + Rate Limiting Shield on every request!
+app.add_middleware(CyberArmorMiddleware, max_requests_per_minute=120)
+
 init_db()
 
 JWT_SECRET = "my-super-secret-kitchen-stamp-2026"
@@ -561,3 +573,24 @@ def erase_customer_dpdp(
       "erased_customer": customer_id,
       "records_deleted": deleted_rows,
   }
+
+@app.get("/security/audit-log")
+def get_security_audit_log():
+  """Returns the live CCTV Security Audit Log and active OWASP protections."""
+  return {
+      "active_shields": [
+          "OWASP Security Headers (HSTS, CSP, X-Frame-Options: DENY, nosniff)",
+          "IP Rate Limiting & Brute-Force Protection (120 req/min)",
+          "PBKDF2-HMAC-SHA256 (100,000 iterations) Password Hashing",
+          "Parameterized SQL Queries + Regex SQLi/XSS Input Sanitizer",
+          "Multi-Tenant Row-Level Isolation (tenant_id enforcement)",
+      ],
+      "recent_events": SECURITY_AUDIT_LOG,
+  }
+
+
+@app.get("/security/test-sqli")
+def test_sql_injection_shield(customer_query: str):
+  """Endpoint to prove SQL Injection & XSS payloads are blocked immediately."""
+  clean_val = sanitize_identifier(customer_query, field_name="customer_query")
+  return {"status": "Safe input accepted", "sanitized_value": clean_val}
