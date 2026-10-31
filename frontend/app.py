@@ -1,6 +1,10 @@
+import os
 import pandas as pd
 import requests
 import streamlit as st
+
+# Works on local laptop AND inside Docker/Kubernetes!
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 
 st.set_page_config(page_title="E-Commerce Analytics", layout="wide")
 st.title("🛒 Intelligent E-Commerce Customer Behavior Analytics")
@@ -14,16 +18,14 @@ if "oauth_jwt" not in st.session_state:
 if "m2m_jwt" not in st.session_state:
   st.session_state.m2m_jwt = ""
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔑 1. API Key",
     "🎟️ 2-4. Basic + Bearer + JWT",
-    "🌐 5. OAuth2 Auth Code Flow",
-    "🤖 6. OAuth2 Client Credentials (ML Churn)",
+    "🌐 5. OAuth2 Auth Code",
+    "🤖 6. OAuth2 Client Credentials (ML)",
+    "⚡ 7. Spark ETL & Hadoop Data Lake",
 ])
 
-# ==========================================
-# TAB 1: API KEY DEMO
-# ==========================================
 with tab1:
   st.subheader("Guard #1: API Key Authentication (`X-API-Key`)")
   selected_option = st.selectbox(
@@ -39,7 +41,7 @@ with tab1:
 
   if st.button("Load Customers with API Key"):
     response = requests.get(
-        "http://127.0.0.1:8000/rfm", headers={"X-API-Key": api_key}
+        f"{BACKEND_URL}/rfm", headers={"X-API-Key": api_key}
     )
     if response.status_code == 200:
       data = response.json()
@@ -55,23 +57,16 @@ with tab1:
           f"🚨 HTTP {response.status_code}: {response.json().get('detail')}"
       )
 
-# ==========================================
-# TAB 2: BASIC AUTH -> BEARER JWT DEMO
-# ==========================================
 with tab2:
   col1, col2 = st.columns(2)
   with col1:
     st.subheader("Step 1: Ticket Booth (Guard #2: Basic Auth)")
-    st.write(
-        "Try **`alice` / `passwordA`** (Store A) or **`vikram` / `passwordB`**"
-        " (Store B)."
-    )
     username = st.text_input("Username", value="alice")
     password = st.text_input("Password", value="passwordA", type="password")
 
     if st.button("1️⃣ Log In with Basic Auth & Get JWT Wristband"):
       res = requests.post(
-          "http://127.0.0.1:8000/login-basic", auth=(username, password)
+          f"{BACKEND_URL}/login-basic", auth=(username, password)
       )
       if res.status_code == 200:
         data = res.json()
@@ -90,7 +85,7 @@ with tab2:
     )
     if st.button("2️⃣ Call /rfm-jwt with Bearer Wristband"):
       res = requests.get(
-          "http://127.0.0.1:8000/rfm-jwt",
+          f"{BACKEND_URL}/rfm-jwt",
           headers={"Authorization": f"Bearer {token_box}"},
       )
       if res.status_code == 200:
@@ -105,20 +100,16 @@ with tab2:
       else:
         st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
 
-# ==========================================
-# TAB 3: OAUTH 2.0 AUTHORIZATION CODE FLOW
-# ==========================================
 with tab3:
-  st.subheader("Guard #5: OAuth 2.0 Authorization Code Flow (2-Step Login)")
+  st.subheader("Guard #5: OAuth 2.0 Authorization Code Flow")
   c1, c2, c3 = st.columns(3)
-
   with c1:
     st.markdown("#### Step 1: Get 1-Time Code")
     oa_user = st.text_input("OAuth User", value="vikram")
     oa_pass = st.text_input("OAuth Password", value="passwordB", type="password")
     if st.button("1️⃣ Authorize & Get Code"):
       res = requests.post(
-          "http://127.0.0.1:8000/oauth/authorize",
+          f"{BACKEND_URL}/oauth/authorize",
           data={"username": oa_user, "password": oa_pass},
       )
       if res.status_code == 200:
@@ -134,13 +125,13 @@ with tab3:
     )
     if st.button("2️⃣ Exchange Code at /oauth/token"):
       res = requests.post(
-          "http://127.0.0.1:8000/oauth/token",
+          f"{BACKEND_URL}/oauth/token",
           data={"grant_type": "authorization_code", "code": code_input},
       )
       if res.status_code == 200:
         data = res.json()
         st.session_state.oauth_jwt = data["access_token"]
-        st.success("✅ Exchanged code for OAuth JWT! (Try clicking again—the code is now used up!)")
+        st.success("✅ Exchanged code for OAuth JWT!")
         st.json(data["decoded_claims"])
       else:
         st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
@@ -149,7 +140,7 @@ with tab3:
     st.markdown("#### Step 3: Load Store Data")
     if st.button("3️⃣ Call /rfm-jwt with OAuth Token"):
       res = requests.get(
-          "http://127.0.0.1:8000/rfm-jwt",
+          f"{BACKEND_URL}/rfm-jwt",
           headers={"Authorization": f"Bearer {st.session_state.oauth_jwt}"},
       )
       if res.status_code == 200:
@@ -159,16 +150,9 @@ with tab3:
       else:
         st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
 
-# ==========================================
-# TAB 4: OAUTH 2.0 CLIENT CREDENTIALS (M2M)
-# ==========================================
 with tab4:
-  st.subheader(
-      "Guard #6: OAuth 2.0 Client Credentials Flow (Analytics Robot -> ML Churn"
-      " Service)"
-  )
+  st.subheader("Guard #6: OAuth 2.0 Client Credentials Flow (M2M)")
   col_a, col_b = st.columns(2)
-
   with col_a:
     st.markdown("#### Step 1: Robot Authenticates")
     client_id = st.text_input("Robot Client ID", value="analytics-robot")
@@ -177,7 +161,7 @@ with tab4:
     )
     if st.button("1️⃣ Get Machine-to-Machine JWT"):
       res = requests.post(
-          "http://127.0.0.1:8000/oauth/token",
+          f"{BACKEND_URL}/oauth/token",
           data={
               "grant_type": "client_credentials",
               "client_id": client_id,
@@ -197,7 +181,7 @@ with tab4:
     target_store = st.selectbox("Select Store to Predict Churn:", ["store_a", "store_b"])
     if st.button("2️⃣ Run ML Churn Prediction"):
       res = requests.get(
-          f"http://127.0.0.1:8000/ml/churn?tenant_id={target_store}",
+          f"{BACKEND_URL}/ml/churn?tenant_id={target_store}",
           headers={"Authorization": f"Bearer {st.session_state.m2m_jwt}"},
       )
       if res.status_code == 200:
@@ -209,3 +193,58 @@ with tab4:
         st.dataframe(pd.DataFrame(data["predictions"]), use_container_width=True)
       else:
         st.error(f"🚨 HTTP {res.status_code}: {res.json().get('detail')}")
+
+# ==========================================
+# TAB 5: SPARK ETL & HADOOP DATA LAKE
+# ==========================================
+with tab5:
+  st.subheader("⚡ Apache Spark ETL Pipeline & Hadoop Parquet Data Lake")
+  st.write(
+      "Upload a raw/dirty CSV file (or use the built-in dirty sample below) to"
+      " test **Extract → Transform (PySpark) → Load (HDFS Parquet + SQLite)**!"
+  )
+
+  etl_key_option = st.selectbox(
+      "Select Store API Key for ETL Ingestion:",
+      ["key-store-a-123 (Store A)", "key-store-b-456 (Store B)"],
+  )
+  etl_api_key = etl_key_option.split(" ")[0]
+
+  sample_dirty_csv = """InvoiceNo,CustomerID,InvoiceDate,Quantity,UnitPrice
+550001,Ananya,2026-10-30,15,120.0
+550002,,2026-10-30,5,50.0
+550003,Ananya,2026-10-29,-3,120.0
+550004,Dev,2026-10-28,10,90.0
+550005,Meera,2026-10-25,8,0.0"""
+
+  st.markdown(
+      "**Sample Dirty CSV (includes missing CustomerID, negative Quantity"
+      " `-3`, and zero UnitPrice `0.0`):**"
+  )
+  csv_text = st.text_area("Raw CSV Data to Send to ETL:", value=sample_dirty_csv, height=150)
+
+  if st.button("🚀 Run Spark ETL & Save to Hadoop Parquet Data Lake"):
+    files = {"file": ("dirty_sales.csv", csv_text.encode("utf-8"), "text/csv")}
+    res = requests.post(
+        f"{BACKEND_URL}/etl/upload",
+        headers={"X-API-Key": etl_api_key},
+        files=files,
+    )
+    if res.status_code == 200:
+      data = res.json()
+      st.success(f"✅ {data['status']} using **{data['engine']}**!")
+      m1, m2, m3 = st.columns(3)
+      m1.metric("1. Extracted Raw Rows", data["extract_raw_rows"])
+      m2.metric(
+          "2. Dirty Rows Removed (Transform)",
+          data["transform_dirty_rows_removed"],
+      )
+      m3.metric("3. Clean Rows Loaded", data["load_clean_rows_saved"])
+      st.info(
+          "📦 **Hadoop Data Lake Partition Written:**"
+          f" `{data['hadoop_data_lake_path']}`"
+      )
+      st.json(data)
+    else:
+      st.error(f"🚨 HTTP {res.status_code}: {res.text}")
+      

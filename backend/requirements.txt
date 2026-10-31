@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pandas
+pyjwt
+python-multipart
+pyarrow
+pytest
+httpx

@@ -2,22 +2,20 @@ from datetime import datetime, timedelta, timezone
 import secrets
 import sqlite3
 from database import DB_PATH, init_db
-from fastapi import Depends, FastAPI, Form, HTTPException, Security
+from etl_spark import run_spark_etl
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
 import pandas as pd
 
 app = FastAPI(title="Intelligent E-Commerce Analytics API")
 
-# 1. Start the Fridge
 init_db()
 
 JWT_SECRET = "my-super-secret-kitchen-stamp-2026"
 JWT_ALGORITHM = "HS256"
 
-# ==========================================
-# GUARD #1: API Key (X-API-Key Header)
-# ==========================================
+# GUARD #1: API Key
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 API_KEYS = {
     "key-store-a-123": {"tenant_id": "store_a", "store_name": "Toy Kingdom"},
@@ -34,9 +32,7 @@ def verify_api_key(api_key: str = Security(api_key_header)):
   return API_KEYS[api_key]
 
 
-# ==========================================
-# GUARD #2: Basic Auth (Username + Password)
-# ==========================================
+# GUARD #2: Basic Auth
 basic_security = HTTPBasic()
 USERS_DB = {
     "alice": {
@@ -68,9 +64,7 @@ def verify_basic_auth(
   return {"username": credentials.username, **user}
 
 
-# ==========================================
-# GUARD #3 & #4: Bearer Token + JWT Wristband
-# ==========================================
+# GUARD #3 & #4: Bearer JWT
 bearer_security = HTTPBearer(auto_error=False)
 
 
@@ -83,27 +77,19 @@ def verify_jwt_bearer(
     )
   token = credentials.credentials
   try:
-    payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    return payload
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
   except jwt.ExpiredSignatureError:
     raise HTTPException(
-        status_code=401,
-        detail="Guard #4 (JWT): Your wristband expired! Please log in again.",
+        status_code=401, detail="Guard #4 (JWT): Your wristband expired!"
     )
   except jwt.InvalidTokenError:
     raise HTTPException(
-        status_code=401,
-        detail="Guard #4 (JWT): Fake or tampered JWT wristband!",
+        status_code=401, detail="Guard #4 (JWT): Fake or tampered JWT wristband!"
     )
 
 
-# ==========================================
-# GUARD #5 & #6: OAuth 2.0 (Auth Code + Client Credentials)
-# ==========================================
-# Temporary 1-time paper tickets for Guard #5 (Authorization Code Flow)
+# GUARD #5 & #6: OAuth 2.0
 AUTH_CODES = {}
-
-# Robot accounts for Guard #6 (Client Credentials Flow between Microservices)
 OAUTH_CLIENTS = {
     "analytics-robot": {
         "client_secret": "robot-secret-999",
@@ -142,7 +128,6 @@ def say_hello():
   return {"message": "Hello from the kitchen!"}
 
 
-# 1. API Key Protected Endpoint
 @app.get("/rfm")
 def get_rfm_api_key(store: dict = Security(verify_api_key)):
   return {
@@ -153,7 +138,6 @@ def get_rfm_api_key(store: dict = Security(verify_api_key)):
   }
 
 
-# 2. Basic Auth Login -> Issues JWT
 @app.post("/login-basic")
 def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
   payload = {
@@ -173,7 +157,6 @@ def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
   }
 
 
-# 3 & 4. Bearer JWT Protected Endpoint
 @app.get("/rfm-jwt")
 def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
   if "tenant_id" not in claims:
@@ -189,7 +172,6 @@ def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
   }
 
 
-# 5A. OAuth2 Authorization Code Flow - Step 1: Get 1-Time Authorization Code
 @app.post("/oauth/authorize")
 def oauth_authorize(username: str = Form(...), password: str = Form(...)):
   user = USERS_DB.get(username)
@@ -201,7 +183,6 @@ def oauth_authorize(username: str = Form(...), password: str = Form(...)):
             " screen!"
         ),
     )
-  # Create a 1-time secret code
   code = f"authcode_{secrets.token_hex(8)}"
   AUTH_CODES[code] = {"username": username, **user}
   return {
@@ -210,7 +191,6 @@ def oauth_authorize(username: str = Form(...), password: str = Form(...)):
   }
 
 
-# 5B & 6. OAuth2 Token Endpoint (Handles BOTH Authorization Code & Client Credentials!)
 @app.post("/oauth/token")
 def oauth_token(
     grant_type: str = Form(...),
@@ -218,7 +198,6 @@ def oauth_token(
     client_id: str = Form(None),
     client_secret: str = Form(None),
 ):
-  # Guard #5: OAuth Authorization Code Flow
   if grant_type == "authorization_code":
     if not code or code not in AUTH_CODES:
       raise HTTPException(
@@ -228,7 +207,6 @@ def oauth_token(
               " authorization_code!"
           ),
       )
-    # Pop the code so it can NEVER be used a second time!
     user = AUTH_CODES.pop(code)
     payload = {
         "sub": user["username"],
@@ -245,7 +223,6 @@ def oauth_token(
         "decoded_claims": payload,
     }
 
-  # Guard #6: OAuth Client Credentials Flow (Machine-to-Machine)
   elif grant_type == "client_credentials":
     client = OAUTH_CLIENTS.get(client_id)
     if not client or client["client_secret"] != client_secret:
@@ -269,14 +246,12 @@ def oauth_token(
         "token_type": "Bearer",
         "decoded_claims": payload,
     }
-
   else:
     raise HTTPException(
         status_code=400, detail="Unsupported OAuth2 grant_type!"
     )
 
 
-# 6B. ML Service Endpoint: Churn Prediction (Protected by OAuth Client Credentials JWT with scope 'ml:predict')
 @app.get("/ml/churn")
 def predict_churn(
     tenant_id: str = "store_a", claims: dict = Security(verify_jwt_bearer)
@@ -288,7 +263,6 @@ def predict_churn(
     )
   rfm_list = calculate_rfm_for_tenant(tenant_id)
   for row in rfm_list:
-    # Simple rule-based + risk score for demo: if Recency > 30 days, High Churn Risk!
     row["Churn_Probability"] = (
         round(min(0.95, row["Recency"] / 100), 2)
         if row["Recency"] > 10
@@ -303,3 +277,15 @@ def predict_churn(
       "tenant_id": tenant_id,
       "predictions": rfm_list,
   }
+
+
+# ==========================================
+# NEW: BIG DATA SPARK ETL + HADOOP PARQUET DATA LAKE ENDPOINT
+# ==========================================
+@app.post("/etl/upload")
+async def upload_sales_etl(
+    file: UploadFile = File(...), store: dict = Security(verify_api_key)
+):
+  csv_bytes = await file.read()
+  result = run_spark_etl(csv_bytes, tenant_id=store["tenant_id"])
+  return result
