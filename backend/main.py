@@ -1,3 +1,6 @@
+# Import the chunked file streaming ETL function for large datasets
+from etl_spark import run_spark_etl_from_file
+
 from datetime import datetime, timedelta, timezone
 import secrets
 import sqlite3
@@ -124,9 +127,10 @@ OAUTH_CLIENTS = {
 }
 
 
+# Aggregates millions of sales rows directly inside the C-based SQL engine and returns top 500 customers
 def calculate_rfm_for_tenant(tenant_id: str):
   conn = sqlite3.connect(DB_PATH)
-  # Push aggregation of millions of rows directly to the indexed SQL engine!
+  # Run GROUP BY in SQL so Python never loads 1 million raw rows into RAM
   query = """
         SELECT
             CustomerID,
@@ -137,6 +141,7 @@ def calculate_rfm_for_tenant(tenant_id: str):
         WHERE tenant_id = ?
         GROUP BY CustomerID
         ORDER BY Monetary DESC
+        LIMIT 500
     """
   rfm = pd.read_sql_query(query, conn, params=(tenant_id,))
   conn.close()
@@ -144,6 +149,7 @@ def calculate_rfm_for_tenant(tenant_id: str):
   if rfm.empty:
     return []
 
+  # Calculate Recency in days from the most recent purchase date in the store
   rfm["LastDate"] = pd.to_datetime(rfm["LastDate"], errors="coerce")
   today = rfm["LastDate"].max() + pd.Timedelta(days=1)
   rfm["Recency"] = (
@@ -171,17 +177,15 @@ def calculate_rfm_for_tenant(tenant_id: str):
   return rfm.to_dict(orient="records")
 
 
-@app.get("/store-insights")
-def get_store_insights(store: dict = Security(verify_api_key)):
-  tenant_id = store["tenant_id"]
-  store_name = store["store_name"]
-  customers = calculate_rfm_for_tenant(tenant_id)
+# Streams the uploaded file directly from disk SpooledTemporaryFile into the chunked ETL engine
+@app.post("/etl/upload")
+def upload_sales_etl(
+    file: UploadFile = File(...), store: dict = Security(verify_api_key)
+):
+  # Pass file.file (stream) instead of reading 260MB into RAM with file.read()
+  result = run_spark_etl_from_file(file.file, tenant_id=store["tenant_id"])
+  return result
 
-  total_revenue = sum(c["Monetary"] for c in customers)
-  total_customers = len(customers)
-  avg_spend = (
-      round(total_revenue / total_customers, 2) if total_customers else 0
-  )
 
   # Run Real Scikit-Learn K-Means Clustering on (Recency, Frequency, Monetary)
   rfm_df = pd.DataFrame(customers)
