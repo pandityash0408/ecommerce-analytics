@@ -85,6 +85,16 @@ app.get("/api/security/audit", async (req, res) => {
   }
 });
 
+// Returns the dynamic list of all stores (including newly uploaded CSV stores)
+app.get("/api/stores", async (req, res) => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/stores`);
+    res.status(response.status).json(await response.json());
+  } catch (err) {
+    res.status(500).json({ detail: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 PulseIQ Express.js Frontend running on http://localhost:${PORT}`);
 });

@@ -47,31 +47,32 @@ API_KEYS = {
 
 
 # Validates the X-API-Key header and returns the corresponding store tenant info
+# Validates X-API-Key against both default keys and dynamically uploaded CSV stores in SQLite
 def verify_api_key(api_key: str = Security(api_key_header)):
-  if api_key not in API_KEYS:
-    raise HTTPException(
-        status_code=401,
-        detail="Guard #1 (API Key): Invalid or missing X-API-Key!",
-    )
-  return API_KEYS[api_key]
+  if api_key in API_KEYS:
+    return API_KEYS[api_key]
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  cur = conn.cursor()
+  cur.execute(
+      "SELECT tenant_id, store_name FROM stores WHERE api_key = ?", (api_key,)
+  )
+  row = cur.fetchone()
+  conn.close()
+  if row:
+    return {"tenant_id": row[0], "store_name": row[1]}
+  raise HTTPException(
+      status_code=401,
+      detail="Guard #1 (API Key): Invalid or missing X-API-Key!",
+  )
 
 
-# Guard #2: Configure HTTP Basic Authentication and store user credentials
-basic_security = HTTPBasic()
-USERS_DB = {
-    "alice": {
-        "password": "passwordA",
-        "tenant_id": "store_a",
-        "store_name": "Toy Kingdom",
-        "scopes": ["analytics:read"],
-    },
-    "vikram": {
-        "password": "passwordB",
-        "tenant_id": "store_b",
-        "store_name": "Sneaker World",
-        "scopes": ["analytics:read"],
-    },
-}
+# Returns all registered stores (including newly uploaded CSV stores) for the frontend dropdown
+@app.get("/stores")
+def list_all_stores():
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  df = pd.read_sql_query("SELECT tenant_id, store_name, api_key FROM stores", conn)
+  conn.close()
+  return {"stores": df.to_dict(orient="records")}
 
 
 # Validates HTTP Basic username and password using constant-time digest comparison
@@ -429,11 +430,14 @@ def predict_churn(
   }
 
 
+# Streams the uploaded CSV and automatically registers a dedicated store tenant from its filename/data
 @app.post("/etl/upload")
 def upload_sales_etl(
     file: UploadFile = File(...), store: dict = Security(verify_api_key)
 ):
-  return run_spark_etl_from_file(file.file, tenant_id=store["tenant_id"])
+  return run_spark_etl_from_file(
+      file.file, tenant_id=store["tenant_id"], filename=file.filename
+  )
 
 
 @app.get("/customer-360/{customer_id}")
