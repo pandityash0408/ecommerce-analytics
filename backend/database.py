@@ -22,6 +22,13 @@ def init_db():
             UnitPrice REAL NOT NULL
         )
     """)
+  # Turbo-charge SQLite for millions of rows (Write-Ahead Logging + B-Tree Index)
+  cursor.execute("PRAGMA journal_mode=WAL;")
+  cursor.execute("PRAGMA synchronous=NORMAL;")
+  cursor.execute(
+      "CREATE INDEX IF NOT EXISTS idx_sales_tenant ON sales(tenant_id,"
+      " CustomerID);"
+  )
 
   # 2. If the fridge is empty, put starter sales in for Store A and Store B
   cursor.execute("SELECT COUNT(*) FROM sales")

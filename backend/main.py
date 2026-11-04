@@ -126,10 +126,33 @@ OAUTH_CLIENTS = {
 
 def calculate_rfm_for_tenant(tenant_id: str):
   conn = sqlite3.connect(DB_PATH)
-  df = pd.read_sql_query(
-      "SELECT * FROM sales WHERE tenant_id = ?", conn, params=(tenant_id,)
-  )
+  # Push aggregation of millions of rows directly to the indexed SQL engine!
+  query = """
+        SELECT
+            CustomerID,
+            MAX(InvoiceDate) AS LastDate,
+            COUNT(DISTINCT InvoiceNo) AS Frequency,
+            ROUND(SUM(Quantity * UnitPrice), 2) AS Monetary
+        FROM sales
+        WHERE tenant_id = ?
+        GROUP BY CustomerID
+        ORDER BY Monetary DESC
+    """
+  rfm = pd.read_sql_query(query, conn, params=(tenant_id,))
   conn.close()
+
+  if rfm.empty:
+    return []
+
+  rfm["LastDate"] = pd.to_datetime(rfm["LastDate"], errors="coerce")
+  today = rfm["LastDate"].max() + pd.Timedelta(days=1)
+  rfm["Recency"] = (
+      (today - rfm["LastDate"]).dt.days.fillna(30).astype(int).clip(lower=1)
+  )
+
+  return rfm[["CustomerID", "Recency", "Frequency", "Monetary"]].to_dict(
+      orient="records"
+  )
 
   df["TotalPrice"] = df["Quantity"] * df["UnitPrice"]
   df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
