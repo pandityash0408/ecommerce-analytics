@@ -1,49 +1,44 @@
-# Import the chunked file streaming ETL function for large datasets
-from etl_spark import run_spark_etl_from_file
-
 from datetime import datetime, timedelta, timezone
 import secrets
 import sqlite3
 from database import DB_PATH, init_db
-from etl_spark import run_spark_etl
+from etl_spark import run_spark_etl, run_spark_etl_from_file
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI(title="Intelligent E-Commerce Analytics API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
 import pandas as pd
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-
-app = FastAPI(title="Intelligent E-Commerce Analytics API")
-
 from security_shield import (
     CyberArmorMiddleware,
     SECURITY_AUDIT_LOG,
-    log_security_event,
-    sanitize_identifier,
-    verify_hashed_secret,
-    hash_secret,
+     sanitize_identifier,
+)
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+
+# Initialize FastAPI application
+app = FastAPI(title="Intelligent E-Commerce Analytics API")
+
+# Add CyberArmor OWASP security headers and high-limit rate protection
+app.add_middleware(CyberArmorMiddleware, max_requests_per_minute=300)
+
+# Enable CORS so browser fetch requests from port 3000 to port 8000 are always allowed
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Activate OWASP Security Headers + Rate Limiting Shield on every request!
-app.add_middleware(CyberArmorMiddleware, max_requests_per_minute=120)
-
+# Initialize the multi-tenant SQLite database on startup
 init_db()
 
+# Define secret key and algorithm for signing JWT tokens
 JWT_SECRET = "my-super-secret-kitchen-stamp-2026"
 JWT_ALGORITHM = "HS256"
 
-# GUARD #1: API Key
+# Guard #1: Configure X-API-Key header security and tenant mapping
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 API_KEYS = {
     "key-store-a-123": {"tenant_id": "store_a", "store_name": "Toy Kingdom"},
@@ -51,6 +46,7 @@ API_KEYS = {
 }
 
 
+# Validates the X-API-Key header and returns the corresponding store tenant info
 def verify_api_key(api_key: str = Security(api_key_header)):
   if api_key not in API_KEYS:
     raise HTTPException(
@@ -60,7 +56,7 @@ def verify_api_key(api_key: str = Security(api_key_header)):
   return API_KEYS[api_key]
 
 
-# GUARD #2: Basic Auth
+# Guard #2: Configure HTTP Basic Authentication and store user credentials
 basic_security = HTTPBasic()
 USERS_DB = {
     "alice": {
@@ -78,6 +74,7 @@ USERS_DB = {
 }
 
 
+# Validates HTTP Basic username and password using constant-time digest comparison
 def verify_basic_auth(
     credentials: HTTPBasicCredentials = Depends(basic_security),
 ):
@@ -92,7 +89,7 @@ def verify_basic_auth(
   return {"username": credentials.username, **user}
 
 
-# GUARD #3 & #4: Bearer JWT
+# Guards #3 & #4: Configure HTTP Bearer token extraction and JWT verification
 bearer_security = HTTPBearer(auto_error=False)
 
 
@@ -116,7 +113,7 @@ def verify_jwt_bearer(
     )
 
 
-# GUARD #5 & #6: OAuth 2.0
+# Guards #5 & #6: Store temporary OAuth2 authorization codes and M2M client credentials
 AUTH_CODES = {}
 OAUTH_CLIENTS = {
     "analytics-robot": {
@@ -127,10 +124,9 @@ OAUTH_CLIENTS = {
 }
 
 
-# Aggregates millions of sales rows directly inside the C-based SQL engine and returns top 500 customers
+# Computes RFM metrics for top 200 customers directly in SQL for million-row speed
 def calculate_rfm_for_tenant(tenant_id: str):
-  conn = sqlite3.connect(DB_PATH)
-  # Run GROUP BY in SQL so Python never loads 1 million raw rows into RAM
+  conn = sqlite3.connect(DB_PATH, timeout=60)
   query = """
         SELECT
             CustomerID,
@@ -141,7 +137,7 @@ def calculate_rfm_for_tenant(tenant_id: str):
         WHERE tenant_id = ?
         GROUP BY CustomerID
         ORDER BY Monetary DESC
-        LIMIT 500
+        LIMIT 200
     """
   rfm = pd.read_sql_query(query, conn, params=(tenant_id,))
   conn.close()
@@ -149,9 +145,14 @@ def calculate_rfm_for_tenant(tenant_id: str):
   if rfm.empty:
     return []
 
-  # Calculate Recency in days from the most recent purchase date in the store
+  # Convert LastDate to datetime and compute Recency days relative to latest store order
   rfm["LastDate"] = pd.to_datetime(rfm["LastDate"], errors="coerce")
-  today = rfm["LastDate"].max() + pd.Timedelta(days=1)
+  max_date = rfm["LastDate"].max()
+  today = (
+      (max_date + pd.Timedelta(days=1))
+      if pd.notna(max_date)
+      else pd.Timestamp.today()
+  )
   rfm["Recency"] = (
       (today - rfm["LastDate"]).dt.days.fillna(30).astype(int).clip(lower=1)
   )
@@ -160,34 +161,30 @@ def calculate_rfm_for_tenant(tenant_id: str):
       orient="records"
   )
 
-  df["TotalPrice"] = df["Quantity"] * df["UnitPrice"]
-  df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
-  today = df["InvoiceDate"].max() + pd.Timedelta(days=1)
 
-  rfm = (
-      df.groupby("CustomerID")
-      .agg(
-          Recency=("InvoiceDate", lambda dates: int((today - dates.max()).days)),
-          Frequency=("InvoiceNo", lambda x: int(x.nunique())),
-          Monetary=("TotalPrice", lambda x: float(x.sum())),
-      )
-      .reset_index()
-      .sort_values(by="Monetary", ascending=False)
+# Returns full store KPIs, K-Means clusters, behavior reviews, and product bundles
+@app.get("/store-insights")
+def get_store_insights(store: dict = Security(verify_api_key)):
+  tenant_id = store["tenant_id"]
+  store_name = store["store_name"]
+
+  # Query exact total revenue and total unique customers across all 1M+ rows in SQL
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  cur = conn.cursor()
+  cur.execute(
+      "SELECT COALESCE(ROUND(SUM(Quantity * UnitPrice), 2), 0),"
+      " COUNT(DISTINCT CustomerID) FROM sales WHERE tenant_id = ?",
+      (tenant_id,),
   )
-  return rfm.to_dict(orient="records")
+  total_revenue, total_customers = cur.fetchone()
+  conn.close()
 
+  avg_spend = (
+      round(total_revenue / total_customers, 2) if total_customers else 0
+  )
+  customers = calculate_rfm_for_tenant(tenant_id)
 
-# Streams the uploaded file directly from disk SpooledTemporaryFile into the chunked ETL engine
-@app.post("/etl/upload")
-def upload_sales_etl(
-    file: UploadFile = File(...), store: dict = Security(verify_api_key)
-):
-  # Pass file.file (stream) instead of reading 260MB into RAM with file.read()
-  result = run_spark_etl_from_file(file.file, tenant_id=store["tenant_id"])
-  return result
-
-
-  # Run Real Scikit-Learn K-Means Clustering on (Recency, Frequency, Monetary)
+  # Run Scikit-Learn K-Means clustering on customer Recency, Frequency, and Monetary features
   rfm_df = pd.DataFrame(customers)
   if len(rfm_df) >= 3:
     scaler = StandardScaler()
@@ -198,27 +195,27 @@ def upload_sales_etl(
     rfm_df["KMeans_Cluster"] = [
         f"Cluster {c}" for c in kmeans.fit_predict(scaled_features)
     ]
-  else:
+  elif not rfm_df.empty:
     rfm_df["KMeans_Cluster"] = "Cluster 0"
 
-  kmeans_map = dict(zip(rfm_df["CustomerID"], rfm_df["KMeans_Cluster"]))
+  kmeans_map = (
+      dict(zip(rfm_df["CustomerID"], rfm_df["KMeans_Cluster"]))
+      if not rfm_df.empty
+      else {}
+  )
 
   enriched_customers = []
-  champions, at_risk, loyal = [], [], []
+  champions, at_risk = [], []
 
+  # Classify each customer into a behavior segment and generate a plain-English retailer action
   for c in customers:
     r, f, m = c["Recency"], c["Frequency"], c["Monetary"]
     avg_order_value = round(m / f, 2) if f > 0 else m
 
     if r <= 7 and (f >= 2 or m >= 1000):
       segment = "🏆 Champion (VIP)"
-      behavior_review = (
-          "Visits very recently, buys repeatedly, and spends high amounts."
-      )
-      retailer_action = (
-          "Give VIP early access to new arrivals & loyalty points (no discount"
-          " needed)."
-      )
+      behavior_review = "Visits very recently, buys repeatedly, and spends high amounts."
+      retailer_action = "Give VIP early access to new arrivals & loyalty points (no discount needed)."
       churn_prob = 5
       champions.append(c["CustomerID"])
     elif r <= 20:
@@ -226,25 +223,16 @@ def upload_sales_etl(
       behavior_review = "Recent shopper with steady buying habits."
       retailer_action = "Recommend product bundles to increase order size."
       churn_prob = 18
-      loyal.append(c["CustomerID"])
     elif r <= 90:
       segment = "⚠️ At-Risk (Slipping)"
-      behavior_review = (
-          f"Has not purchased in {r} days. Interest is fading fast."
-      )
-      retailer_action = (
-          "Send a 'We Miss You! 15% Off' WhatsApp/Email coupon within 48 hours."
-      )
+      behavior_review = f"Has not purchased in {r} days. Interest is fading fast."
+      retailer_action = "Send a 'We Miss You! 15% Off' WhatsApp/Email coupon within 48 hours."
       churn_prob = 65
       at_risk.append(c["CustomerID"])
     else:
       segment = "💤 Lost / Hibernating"
-      behavior_review = (
-          f"Inactive for {r} days. Likely switched to a competitor."
-      )
-      retailer_action = (
-          "Send a major clearance deal or ask for a 1-click feedback survey."
-      )
+      behavior_review = f"Inactive for {r} days. Likely switched to a competitor."
+      retailer_action = "Send a major clearance deal or ask for a 1-click feedback survey."
       churn_prob = 88
       at_risk.append(c["CustomerID"])
 
@@ -268,72 +256,46 @@ def upload_sales_etl(
   top_customer = enriched_customers[0]["CustomerID"] if enriched_customers else "N/A"
   top_spend = enriched_customers[0]["Total_Spent"] if enriched_customers else 0
 
+  # Build automated executive summary reviews for the store owner
   store_reviews = [
-      (
-          f"💰 **Revenue Health:** {store_name} generated **₹{total_revenue:,.2f}**"
-          f" across **{total_customers} customers** (Average spend:"
-          f" **₹{avg_spend:,.2f}** per customer)."
-      ),
-      (
-          f"🌟 **Top VIP Behavior:** **{top_customer}** is your #1 highest-value"
-          f" shopper (spent **₹{top_spend:,.2f}**). Keep them happy with VIP"
-          " perks—losing them would hurt revenue significantly!"
-      ),
-      (
-          f"🚨 **Churn Warning:** **{len(at_risk)} customer(s)**"
-          f" ({', '.join(at_risk) if at_risk else 'None'}) haven't bought"
-          " recently and are at high risk of leaving. Send a win-back offer"
-          " today."
-      ),
-      (
-          "📈 **Growth Opportunity:** Customers who buy more than once spend"
-          " **3x more** on average. Offer a 10% coupon on a customer's"
-          " 2nd order within 14 days of their first purchase!"
-      ),
+      f"💰 **Revenue Health:** {store_name} generated **₹{total_revenue:,.2f}** across **{total_customers:,} unique customers** (Average spend: **₹{avg_spend:,.2f}** per customer).",
+      f"🌟 **Top VIP Behavior:** **{top_customer}** is your #1 highest-value shopper (spent **₹{top_spend:,.2f}**). Keep them happy with VIP perks!",
+      f"🚨 **Churn Warning:** **{len(at_risk)} top-200 customer(s)** haven't bought recently and are at high risk of leaving. Send a win-back offer today.",
+      "📈 **Growth Opportunity:** Customers who buy more than once spend **3x more** on average. Offer a 10% coupon on a customer's 2nd order!",
   ]
 
-  if tenant_id == "store_a":
-    recommendations = [
-        {
-            "If_Customer_Buys": "LEGO Castle Set",
-            "Also_Recommend": "AA Rechargeable Batteries + Display Baseplate",
-            "Confidence": "84%",
-            "Why_It_Works": "Parents buying building sets almost always add accessories at checkout.",
-        },
-        {
-            "If_Customer_Buys": "Remote Control Racing Car",
-            "Also_Recommend": "Extra Rechargeable Battery Pack",
-            "Confidence": "79%",
-            "Why_It_Works": "Doubles playtime; increases average order value by ₹450.",
-        },
-        {
-            "If_Customer_Buys": "Board Game Classic",
-            "Also_Recommend": "Card Sleeves & Puzzle Combo",
-            "Confidence": "68%",
-            "Why_It_Works": "Weekend family shoppers frequently buy 2 games together.",
-        },
-    ]
-  else:
-    recommendations = [
-        {
-            "If_Customer_Buys": "Running Sneakers Pro",
-            "Also_Recommend": "Waterproof Shoe Protector Spray + Ankle Socks (3-Pack)",
-            "Confidence": "87%",
-            "Why_It_Works": "8 out of 10 sneaker buyers protect new shoes when offered at checkout.",
-        },
-        {
-            "If_Customer_Buys": "High-Top Basketball Shoes",
-            "Also_Recommend": "Cushioned Sports Insoles",
-            "Confidence": "74%",
-            "Why_It_Works": "Boosts comfort and adds ₹600 high-margin revenue per order.",
-        },
-    ]
-
-  cohort_retention = [
-      {"Cohort_Month": "Aug 2026", "Month_1": "100%", "Month_2": "68%", "Month_3": "54%"},
-      {"Cohort_Month": "Sep 2026", "Month_1": "100%", "Month_2": "74%", "Month_3": "—"},
-      {"Cohort_Month": "Oct 2026", "Month_1": "100%", "Month_2": "—", "Month_3": "—"},
-  ]
+  # Return store-specific product cross-sell recommendations
+  recommendations = (
+      [
+          {
+              "If_Customer_Buys": "LEGO Castle Set",
+              "Also_Recommend": "AA Rechargeable Batteries + Display Baseplate",
+              "Confidence": "84%",
+              "Why_It_Works": "Parents buying building sets almost always add accessories at checkout.",
+          },
+          {
+              "If_Customer_Buys": "Remote Control Racing Car",
+              "Also_Recommend": "Extra Rechargeable Battery Pack",
+              "Confidence": "79%",
+              "Why_It_Works": "Doubles playtime; increases average order value by ₹450.",
+          },
+      ]
+      if tenant_id == "store_a"
+      else [
+          {
+              "If_Customer_Buys": "Running Sneakers Pro",
+              "Also_Recommend": "Waterproof Shoe Protector Spray + Ankle Socks",
+              "Confidence": "87%",
+              "Why_It_Works": "8 out of 10 sneaker buyers protect new shoes when offered at checkout.",
+          },
+          {
+              "If_Customer_Buys": "High-Top Basketball Shoes",
+              "Also_Recommend": "Cushioned Sports Insoles",
+              "Confidence": "74%",
+              "Why_It_Works": "Boosts comfort and adds ₹600 high-margin revenue per order.",
+          },
+      ]
+  )
 
   return {
       "store_name": store_name,
@@ -346,9 +308,8 @@ def upload_sales_etl(
           "at_risk_count": len(at_risk),
       },
       "store_reviews": store_reviews,
-      "customer_behavior": enriched_customers[:100],  # Send top 100 to keep browser blazing fast!
+      "customer_behavior": enriched_customers[:100],
       "product_recommendations": recommendations,
-      "cohort_retention": cohort_retention,
   }
 
 
@@ -405,19 +366,10 @@ def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
 def oauth_authorize(username: str = Form(...), password: str = Form(...)):
   user = USERS_DB.get(username)
   if not user or user["password"] != password:
-    raise HTTPException(
-        status_code=401,
-        detail=(
-            "Guard #5 (OAuth Auth Code): Invalid user credentials at login"
-            " screen!"
-        ),
-    )
+    raise HTTPException(status_code=401, detail="Invalid user credentials!")
   code = f"authcode_{secrets.token_hex(8)}"
   AUTH_CODES[code] = {"username": username, **user}
-  return {
-      "message": "Step 1 complete! Trade this 1-time code at /oauth/token.",
-      "authorization_code": code,
-  }
+  return {"authorization_code": code}
 
 
 @app.post("/oauth/token")
@@ -429,13 +381,7 @@ def oauth_token(
 ):
   if grant_type == "authorization_code":
     if not code or code not in AUTH_CODES:
-      raise HTTPException(
-          status_code=401,
-          detail=(
-              "Guard #5 (OAuth Auth Code): Invalid or already-used"
-              " authorization_code!"
-          ),
-      )
+      raise HTTPException(status_code=401, detail="Invalid authorization_code!")
     user = AUTH_CODES.pop(code)
     payload = {
         "sub": user["username"],
@@ -446,22 +392,11 @@ def oauth_token(
         "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return {
-        "access_token": token,
-        "token_type": "Bearer",
-        "decoded_claims": payload,
-    }
-
+    return {"access_token": token, "token_type": "Bearer", "decoded_claims": payload}
   elif grant_type == "client_credentials":
     client = OAUTH_CLIENTS.get(client_id)
     if not client or client["client_secret"] != client_secret:
-      raise HTTPException(
-          status_code=401,
-          detail=(
-              "Guard #6 (OAuth Client Credentials): Invalid client_id or"
-              " client_secret!"
-          ),
-      )
+      raise HTTPException(status_code=401, detail="Invalid client credentials!")
     payload = {
         "sub": client_id,
         "service": client["service_name"],
@@ -470,15 +405,8 @@ def oauth_token(
         "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return {
-        "access_token": token,
-        "token_type": "Bearer",
-        "decoded_claims": payload,
-    }
-  else:
-    raise HTTPException(
-        status_code=400, detail="Unsupported OAuth2 grant_type!"
-    )
+    return {"access_token": token, "token_type": "Bearer", "decoded_claims": payload}
+  raise HTTPException(status_code=400, detail="Unsupported grant_type!")
 
 
 @app.get("/ml/churn")
@@ -486,20 +414,13 @@ def predict_churn(
     tenant_id: str = "store_a", claims: dict = Security(verify_jwt_bearer)
 ):
   if "ml:predict" not in claims.get("scopes", []):
-    raise HTTPException(
-        status_code=403,
-        detail="Guard #6 (ML Service): Forbidden! Token lacks 'ml:predict' robot scope!",
-    )
+    raise HTTPException(status_code=403, detail="Forbidden!")
   rfm_list = calculate_rfm_for_tenant(tenant_id)
   for row in rfm_list:
     row["Churn_Probability"] = (
-        round(min(0.95, row["Recency"] / 100), 2)
-        if row["Recency"] > 10
-        else 0.08
+        round(min(0.95, row["Recency"] / 100), 2) if row["Recency"] > 10 else 0.08
     )
-    row["Churn_Status"] = (
-        "⚠️ High Risk" if row["Recency"] > 30 else "✅ Loyal / Safe"
-    )
+    row["Churn_Status"] = "⚠️ High Risk" if row["Recency"] > 30 else "✅ Loyal / Safe"
   return {
       "called_by_robot": claims["sub"],
       "auth_flow": claims.get("auth_flow"),
@@ -509,82 +430,46 @@ def predict_churn(
 
 
 @app.post("/etl/upload")
-async def upload_sales_etl(
+def upload_sales_etl(
     file: UploadFile = File(...), store: dict = Security(verify_api_key)
 ):
-  csv_bytes = await file.read()
-  result = run_spark_etl(csv_bytes, tenant_id=store["tenant_id"])
-  return result
+  return run_spark_etl_from_file(file.file, tenant_id=store["tenant_id"])
+
 
 @app.get("/customer-360/{customer_id}")
 def get_customer_360(
     customer_id: str, store: dict = Security(verify_api_key)
 ):
+  customer_id = sanitize_identifier(customer_id, "customer_id")
   tenant_id = store["tenant_id"]
-  conn = sqlite3.connect(DB_PATH)
+  conn = sqlite3.connect(DB_PATH, timeout=60)
   df = pd.read_sql_query(
-      "SELECT InvoiceNo, InvoiceDate, Quantity, UnitPrice, (Quantity *"
-      " UnitPrice) AS TotalPrice FROM sales WHERE tenant_id = ? AND"
-      " CustomerID = ? ORDER BY InvoiceDate DESC",
+      "SELECT InvoiceNo, InvoiceDate, Quantity, UnitPrice, ROUND(Quantity * UnitPrice, 2) AS TotalPrice "
+      "FROM sales WHERE tenant_id = ? AND CustomerID = ? ORDER BY InvoiceDate DESC LIMIT 50",
       conn,
       params=(tenant_id, customer_id),
   )
   conn.close()
-
   if df.empty:
-    raise HTTPException(
-        status_code=404, detail="Customer not found in this store."
-    )
-
+    raise HTTPException(status_code=404, detail="Customer not found.")
   total_spent = float(df["TotalPrice"].sum())
   orders_count = int(df["InvoiceNo"].nunique())
-  last_date = df["InvoiceDate"].max()
-
-  # SHAP-style feature impact explanation (why the model scored this customer)
-  shap_Drivers = [
-      {
-          "Feature": "Recency (Last Visit Date)",
-          "Impact": (
-              "+High Positive"
-              if last_date >= "2026-10-25"
-              else "-Strong Churn Risk Driver"
-          ),
-      },
-      {
-          "Feature": "Order Frequency",
-          "Impact": (
-              f"{orders_count} distinct orders (+Loyalty boost)"
-              if orders_count >= 2
-              else "Single order (-Needs 2nd order nudge)"
-          ),
-      },
-      {
-          "Feature": "Total Monetary Spend",
-          "Impact": f"₹{total_spent:,.2f} lifetime spend",
-      },
+  last_date = str(df["InvoiceDate"].max())
+  shap_drivers = [
+      {"Feature": "Recency (Last Order)", "Impact": last_date},
+      {"Feature": "Order Count (Sampled)", "Impact": f"{orders_count} orders"},
+      {"Feature": "Monetary Spend", "Impact": f"₹{total_spent:,.2f}"},
   ]
-
-  # Ready-to-send personalized message for the retailer
-  if last_date >= "2026-10-25":
-    campaign_msg = (
-        f"Hi {customer_id}! 🌟 Thank you for being one of {store['store_name']}'s"
-        " top VIP customers! Use code VIP-EARLY20 for early access and double"
-        " reward points on your next order!"
-    )
-  else:
-    campaign_msg = (
-        f"Hi {customer_id}! 👋 We miss seeing you at {store['store_name']}! Here"
-        " is a special 15% OFF welcome-back gift just for you: use code"
-        " COMEBACK15 at checkout within 48 hours!"
-    )
-
+  campaign_msg = (
+      f"Hi {customer_id}! 🌟 Thank you for shopping at {store['store_name']}! Use code VIP15 for 15% OFF your next order!"
+  )
   return {
       "customer_id": customer_id,
       "store_name": store["store_name"],
       "total_spent": total_spent,
       "orders_count": orders_count,
       "last_order_date": last_date,
-      "shap_explanations": shap_Drivers,
+      "shap_explanations": shap_drivers,
       "ready_to_send_message": campaign_msg,
       "order_history": df.to_dict(orient="records"),
   }
@@ -594,41 +479,25 @@ def get_customer_360(
 def erase_customer_dpdp(
     customer_id: str, store: dict = Security(verify_api_key)
 ):
-  """India DPDP Act 2023 Compliance: Right to Erasure (deletes customer data for this store only)."""
-  tenant_id = store["tenant_id"]
-  conn = sqlite3.connect(DB_PATH)
-  cursor = conn.cursor()
-  cursor.execute(
+  customer_id = sanitize_identifier(customer_id, "customer_id")
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  cur = conn.cursor()
+  cur.execute(
       "DELETE FROM sales WHERE tenant_id = ? AND CustomerID = ?",
-      (tenant_id, customer_id),
+      (store["tenant_id"], customer_id),
   )
-  deleted_rows = cursor.rowcount
+  deleted = cur.rowcount
   conn.commit()
   conn.close()
-  return {
-      "compliance": "India DPDP Act 2023 - Right to Erasure Executed",
-      "tenant_id": tenant_id,
-      "erased_customer": customer_id,
-      "records_deleted": deleted_rows,
-  }
+  return {"compliance": "India DPDP Act 2023", "erased_customer": customer_id, "records_deleted": deleted}
+
 
 @app.get("/security/audit-log")
 def get_security_audit_log():
-  """Returns the live CCTV Security Audit Log and active OWASP protections."""
-  return {
-      "active_shields": [
-          "OWASP Security Headers (HSTS, CSP, X-Frame-Options: DENY, nosniff)",
-          "IP Rate Limiting & Brute-Force Protection (120 req/min)",
-          "PBKDF2-HMAC-SHA256 (100,000 iterations) Password Hashing",
-          "Parameterized SQL Queries + Regex SQLi/XSS Input Sanitizer",
-          "Multi-Tenant Row-Level Isolation (tenant_id enforcement)",
-      ],
-      "recent_events": SECURITY_AUDIT_LOG,
-  }
+  return {"recent_events": SECURITY_AUDIT_LOG}
 
 
 @app.get("/security/test-sqli")
 def test_sql_injection_shield(customer_query: str):
-  """Endpoint to prove SQL Injection & XSS payloads are blocked immediately."""
   clean_val = sanitize_identifier(customer_query, field_name="customer_query")
   return {"status": "Safe input accepted", "sanitized_value": clean_val}
