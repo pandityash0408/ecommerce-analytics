@@ -11,7 +11,7 @@ import pandas as pd
 from security_shield import (
     CyberArmorMiddleware,
     SECURITY_AUDIT_LOG,
-     sanitize_identifier,
+    sanitize_identifier,
 )
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
@@ -22,7 +22,7 @@ app = FastAPI(title="Intelligent E-Commerce Analytics API")
 # Add CyberArmor OWASP security headers and high-limit rate protection
 app.add_middleware(CyberArmorMiddleware, max_requests_per_minute=300)
 
-# Enable CORS so browser fetch requests from port 3000 to port 8000 are always allowed
+# Enable CORS so browser requests from port 3000 to port 8000 are always allowed
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,7 +38,7 @@ init_db()
 JWT_SECRET = "my-super-secret-kitchen-stamp-2026"
 JWT_ALGORITHM = "HS256"
 
-# Guard #1: Configure X-API-Key header security and tenant mapping
+# Guard #1: Configure X-API-Key header security and default store keys
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 API_KEYS = {
     "key-store-a-123": {"tenant_id": "store_a", "store_name": "Toy Kingdom"},
@@ -46,7 +46,6 @@ API_KEYS = {
 }
 
 
-# Validates the X-API-Key header and returns the corresponding store tenant info
 # Validates X-API-Key against both default keys and dynamically uploaded CSV stores in SQLite
 def verify_api_key(api_key: str = Security(api_key_header)):
   if api_key in API_KEYS:
@@ -70,9 +69,29 @@ def verify_api_key(api_key: str = Security(api_key_header)):
 @app.get("/stores")
 def list_all_stores():
   conn = sqlite3.connect(DB_PATH, timeout=60)
-  df = pd.read_sql_query("SELECT tenant_id, store_name, api_key FROM stores", conn)
+  df = pd.read_sql_query(
+      "SELECT tenant_id, store_name, api_key FROM stores", conn
+  )
   conn.close()
   return {"stores": df.to_dict(orient="records")}
+
+
+# Guard #2: Configure HTTP Basic Authentication and store user credentials
+basic_security = HTTPBasic()
+USERS_DB = {
+    "alice": {
+        "password": "passwordA",
+        "tenant_id": "store_a",
+        "store_name": "Toy Kingdom",
+        "scopes": ["analytics:read"],
+    },
+    "vikram": {
+        "password": "passwordB",
+        "tenant_id": "store_b",
+        "store_name": "Sneaker World",
+        "scopes": ["analytics:read"],
+    },
+}
 
 
 # Validates HTTP Basic username and password using constant-time digest comparison
@@ -94,6 +113,7 @@ def verify_basic_auth(
 bearer_security = HTTPBearer(auto_error=False)
 
 
+# Decodes and validates a Bearer JWT token and checks its expiration timestamp
 def verify_jwt_bearer(
     credentials: HTTPAuthorizationCredentials = Security(bearer_security),
 ):
@@ -314,11 +334,13 @@ def get_store_insights(store: dict = Security(verify_api_key)):
   }
 
 
+# Healthcheck endpoint for verifying backend readiness
 @app.get("/hello")
 def say_hello():
   return {"message": "Hello from the kitchen!"}
 
 
+# Guard #1 Demo Endpoint: Returns RFM data protected by X-API-Key
 @app.get("/rfm")
 def get_rfm_api_key(store: dict = Security(verify_api_key)):
   return {
@@ -329,6 +351,7 @@ def get_rfm_api_key(store: dict = Security(verify_api_key)):
   }
 
 
+# Guard #2 Demo Endpoint: Authenticates via Basic Auth and issues a signed JWT
 @app.post("/login-basic")
 def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
   payload = {
@@ -348,6 +371,7 @@ def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
   }
 
 
+# Guards #3 & #4 Demo Endpoint: Returns RFM data protected by Bearer JWT token
 @app.get("/rfm-jwt")
 def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
   if "tenant_id" not in claims:
@@ -363,6 +387,7 @@ def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
   }
 
 
+# Guard #5 Step 1: Issues a 1-time OAuth2 authorization code
 @app.post("/oauth/authorize")
 def oauth_authorize(username: str = Form(...), password: str = Form(...)):
   user = USERS_DB.get(username)
@@ -373,6 +398,7 @@ def oauth_authorize(username: str = Form(...), password: str = Form(...)):
   return {"authorization_code": code}
 
 
+# Guards #5 & #6 Token Endpoint: Exchanges authorization_code or client_credentials for JWT
 @app.post("/oauth/token")
 def oauth_token(
     grant_type: str = Form(...),
@@ -410,6 +436,7 @@ def oauth_token(
   raise HTTPException(status_code=400, detail="Unsupported grant_type!")
 
 
+# Guard #6 Protected ML Endpoint: Requires 'ml:predict' scope from Client Credentials flow
 @app.get("/ml/churn")
 def predict_churn(
     tenant_id: str = "store_a", claims: dict = Security(verify_jwt_bearer)
@@ -430,7 +457,7 @@ def predict_churn(
   }
 
 
-# Streams the uploaded CSV and automatically registers a dedicated store tenant from its filename/data
+# Streams uploaded CSV files and auto-creates a dedicated store tenant from the filename/data
 @app.post("/etl/upload")
 def upload_sales_etl(
     file: UploadFile = File(...), store: dict = Security(verify_api_key)
@@ -440,6 +467,7 @@ def upload_sales_etl(
   )
 
 
+# Returns Customer 360 profile, order history, SHAP drivers, and retention campaign message
 @app.get("/customer-360/{customer_id}")
 def get_customer_360(
     customer_id: str, store: dict = Security(verify_api_key)
@@ -479,6 +507,7 @@ def get_customer_360(
   }
 
 
+# Deletes a customer's data to comply with India DPDP Act 2023 Right to Erasure
 @app.delete("/privacy/erase/{customer_id}")
 def erase_customer_dpdp(
     customer_id: str, store: dict = Security(verify_api_key)
@@ -496,11 +525,13 @@ def erase_customer_dpdp(
   return {"compliance": "India DPDP Act 2023", "erased_customer": customer_id, "records_deleted": deleted}
 
 
+# Returns recent security events from the CyberArmor audit log
 @app.get("/security/audit-log")
 def get_security_audit_log():
   return {"recent_events": SECURITY_AUDIT_LOG}
 
 
+# Tests SQL Injection and XSS payload sanitization
 @app.get("/security/test-sqli")
 def test_sql_injection_shield(customer_query: str):
   clean_val = sanitize_identifier(customer_query, field_name="customer_query")
