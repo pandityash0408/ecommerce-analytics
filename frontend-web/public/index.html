@@ -452,6 +452,25 @@
       alert("Copied personalized campaign message to clipboard!");
     }
 
+    // Fetches all registered stores from the database and populates the top navbar Store dropdown
+    async function refreshStoresDropdown(selectApiKey = null) {
+      try {
+        const res = await fetch("/api/stores");
+        if (!res.ok) return;
+        const data = await res.json();
+        const selector = document.getElementById("storeSelector");
+        const currentVal = selectApiKey || selector.value || "key-store-a-123";
+
+        selector.innerHTML = (data.stores || []).map(s =>
+          `<option value="${s.api_key}" class="bg-slate-900 text-white">${s.store_name} (${s.tenant_id})</option>`
+        ).join("");
+
+        selector.value = currentVal;
+      } catch (e) {
+        // Ignore if backend is still booting
+      }
+    }
+    
     // Automatically load the default store's data as soon as the webpage opens
     window.onload = () => loadStoreData(0);
   </script>
