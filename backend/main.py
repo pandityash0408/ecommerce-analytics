@@ -4,6 +4,17 @@ import sqlite3
 from database import DB_PATH, init_db
 from etl_spark import run_spark_etl
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Intelligent E-Commerce Analytics API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
 import pandas as pd
