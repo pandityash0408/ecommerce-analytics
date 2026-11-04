@@ -342,7 +342,7 @@ def get_store_insights(store: dict = Security(verify_api_key)):
           "at_risk_count": len(at_risk),
       },
       "store_reviews": store_reviews,
-      "customer_behavior": enriched_customers,
+      "customer_behavior": enriched_customers[:100],  # Send top 100 to keep browser blazing fast!
       "product_recommendations": recommendations,
       "cohort_retention": cohort_retention,
   }

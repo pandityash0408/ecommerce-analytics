@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3000;
 const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "300mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // 1. Store Insights (RFM + K-Means + CLV + Reviews + Bundles + Cohorts)
