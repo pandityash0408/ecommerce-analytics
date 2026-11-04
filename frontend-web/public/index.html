@@ -302,25 +302,45 @@
       `).join("");
     }
 
+   // Streams large CSV files (260MB+ / 1M+ rows) directly from disk to FastAPI without loading into Chrome RAM
     async function uploadUniversalCsv(event) {
+      // Grab the selected CSV file reference from the file input element
       const file = event.target.files[0];
       if (!file) return;
-      const csvText = await file.text();
+
+      // Read the currently selected store's API Key from the navbar dropdown
       const apiKey = document.getElementById("storeSelector").value;
-
-      const res = await fetch("/api/etl-upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-        body: JSON.stringify({ filename: file.name, csvText })
-      });
-      const data = await res.json();
       const toast = document.getElementById("etlToast");
-      toast.classList.remove("hidden");
-      document.getElementById("etlToastText").innerHTML =
-        `✅ <strong>${data.status}</strong>: Loaded <strong>${data.load_clean_rows_saved} clean rows</strong> (Removed ${data.transform_dirty_rows_removed} bad rows) into Hadoop Data Lake <code>${data.hadoop_data_lake_path}</code>!`;
-      loadStoreData();
-    }
+      const toastText = document.getElementById("etlToastText");
 
+      // Show a live progress banner so the user knows the 1M-row file is streaming
+      toast.classList.remove("hidden");
+      toastText.innerHTML = `⏳ <strong>Streaming ${(file.size / (1024 * 1024)).toFixed(1)} MB file (${file.name})</strong> directly to Spark ETL Engine... Please wait 10-20 seconds...`;
+
+      // Pack the file as a binary multipart stream (uses zero browser RAM!)
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        // Send the binary stream directly to FastAPI port 8000 to bypass JSON memory limits
+        const res = await fetch("http://localhost:8000/etl/upload", {
+          method: "POST",
+          headers: { "X-API-Key": apiKey },
+          body: formData
+        });
+        const data = await res.json();
+
+        // Display the completed ETL row counts and Hadoop Parquet path in the banner
+        toastText.innerHTML =
+          `✅ <strong>${data.status}</strong>: Processed <strong>${data.extract_raw_rows.toLocaleString()} raw rows</strong> ➔ Saved <strong>${data.load_clean_rows_saved.toLocaleString()} clean rows</strong> (Removed ${data.transform_dirty_rows_removed.toLocaleString()} bad rows) into <code>${data.hadoop_data_lake_path}</code>!`;
+
+        // Refresh the dashboard charts and KPIs with the newly loaded million-row dataset
+        loadStoreData();
+      } catch (err) {
+        // Show an error message if the upload connection fails
+        toastText.innerHTML = `🚨 Upload Error: ${err.message}`;
+      }
+    }
     async function eraseCustomerDpdp() {
       if (!selectedCustomerId) return;
       if (!confirm(`Execute India DPDP Act 2023 Right to Erasure for customer "${selectedCustomerId}"?`)) return;
