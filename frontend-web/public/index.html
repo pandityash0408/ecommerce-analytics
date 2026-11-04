@@ -22,23 +22,37 @@
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-extrabold text-xl shadow-lg shadow-indigo-500/30">P</div>
       <div>
         <h1 class="text-xl font-extrabold tracking-tight">Pulse<span class="gradient-text">IQ</span> Retailer Intelligence</h1>
-        <p class="text-xs text-slate-400">Powered by Express.js Gateway • FastAPI ML • PySpark & K-Means</p>
+        <p class="text-xs text-slate-400">Express.js Gateway • FastAPI ML • PySpark Universal ETL • K-Means</p>
       </div>
     </div>
 
-    <div class="flex items-center space-x-4 mt-3 sm:mt-0">
+    <div class="flex flex-wrap items-center gap-3 mt-3 sm:mt-0">
+      <label class="cursor-pointer px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition">
+        📤 Upload Any Sales CSV (Spark ETL)
+        <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="uploadUniversalCsv(event)" />
+      </label>
+
       <div class="flex items-center space-x-2 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2">
-        <span class="text-xs text-slate-400 font-medium">🏪 Active Store:</span>
+        <span class="text-xs text-slate-400 font-medium">🏪 Store:</span>
         <select id="storeSelector" onchange="loadStoreData()" class="bg-transparent text-sm font-semibold text-indigo-400 focus:outline-none cursor-pointer">
-          <option value="key-store-a-123" class="bg-slate-900 text-white">Toy Kingdom (Tenant: store_a)</option>
-          <option value="key-store-b-456" class="bg-slate-900 text-white">Sneaker World (Tenant: store_b)</option>
+          <option value="key-store-a-123" class="bg-slate-900 text-white">Toy Kingdom (store_a)</option>
+          <option value="key-store-b-456" class="bg-slate-900 text-white">Sneaker World (store_b)</option>
         </select>
       </div>
+
       <span id="tenantBadge" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
         ● Shield Active
       </span>
     </div>
   </header>
+
+  <!-- ETL NOTIFICATION BANNER (Hidden until CSV upload) -->
+  <div id="etlToast" class="hidden max-w-7xl w-full mx-auto px-6 pt-4">
+    <div class="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-xs text-emerald-200 flex justify-between items-center">
+      <div id="etlToastText"></div>
+      <button onclick="document.getElementById('etlToast').classList.add('hidden')" class="text-emerald-400 font-bold ml-4">✕</button>
+    </div>
+  </div>
 
   <!-- MAIN CONTENT CONTAINER -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
@@ -74,7 +88,6 @@
 
     <!-- SMART AI STORE REVIEWS + CHARTS -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Left: Automated Retailer Reviews -->
       <div class="glass rounded-2xl p-6 space-y-4">
         <div class="flex items-center justify-between">
           <h3 class="text-lg font-bold text-white">🧠 AI Store Advisor Reviews</h3>
@@ -83,7 +96,6 @@
         <div id="reviewsList" class="space-y-3 text-sm text-slate-300 leading-relaxed"></div>
       </div>
 
-      <!-- Center: Spend vs Predicted 6M CLV Chart -->
       <div class="glass rounded-2xl p-6 lg:col-span-2">
         <h3 class="text-lg font-bold text-white mb-4">📈 Current Spend vs. Predicted 6-Month CLV (₹)</h3>
         <div class="h-64">
@@ -94,7 +106,6 @@
 
     <!-- CUSTOMER BEHAVIOR PLAYBOOK TABLE + 360 INSPECTOR -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Customer Table -->
       <div class="glass rounded-2xl p-6 lg:col-span-2 overflow-x-auto">
         <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
           <div>
@@ -117,22 +128,25 @@
         </table>
       </div>
 
-      <!-- Right: Customer 360 Inspector & WhatsApp Generator -->
       <div class="glass rounded-2xl p-6 flex flex-col justify-between space-y-4 border border-indigo-500/30">
         <div>
           <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">🔍 Customer 360° Deep Dive</span>
           <h3 id="c360Name" class="text-xl font-extrabold text-white mt-1">Select a customer</h3>
           <p id="c360Meta" class="text-xs text-slate-400 mt-1">Click any row in the table to inspect SHAP drivers</p>
-
           <div class="mt-4 space-y-2" id="c360Shap"></div>
         </div>
 
-        <div class="pt-4 border-t border-slate-800">
+        <div class="pt-4 border-t border-slate-800 space-y-2">
           <label class="text-xs font-semibold text-emerald-400 uppercase">💬 Ready-to-Send WhatsApp / Email Offer:</label>
-          <textarea id="c360Message" rows="4" readonly class="w-full mt-2 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none"></textarea>
-          <button onclick="copyCampaign()" class="mt-2 w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition">
-            📋 Copy Personalized Campaign Message
-          </button>
+          <textarea id="c360Message" rows="3" readonly class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none"></textarea>
+          <div class="flex gap-2">
+            <button onclick="copyCampaign()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs transition">
+              📋 Copy Offer
+            </button>
+            <button onclick="eraseCustomerDpdp()" class="px-3 py-2.5 rounded-xl bg-rose-950 hover:bg-rose-900 border border-rose-500/30 text-rose-300 font-semibold text-xs transition" title="India DPDP Act 2023 Right to Erasure">
+              🗑️ DPDP Erase
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -180,6 +194,7 @@
 
   <script>
     let currentBaseRevenue = 0;
+    let selectedCustomerId = "";
     let clvChartInstance = null;
 
     async function loadStoreData() {
@@ -187,7 +202,6 @@
       const res = await fetch("/api/insights", { headers: { "x-api-key": apiKey } });
       const data = await res.json();
 
-      // Update KPIs
       currentBaseRevenue = data.kpis.total_revenue;
       document.getElementById("kpiRevenue").innerText = "₹" + data.kpis.total_revenue.toLocaleString("en-IN");
       document.getElementById("kpiCustomers").innerText = data.kpis.total_customers;
@@ -196,13 +210,10 @@
       document.getElementById("kpiAtRisk").innerText = data.kpis.at_risk_count;
       document.getElementById("tenantBadge").innerText = `● ${data.store_name} (${data.tenant_id})`;
 
-      // Update AI Reviews
-      const reviewsContainer = document.getElementById("reviewsList");
-      reviewsContainer.innerHTML = data.store_reviews.map(r =>
+      document.getElementById("reviewsList").innerHTML = data.store_reviews.map(r =>
         `<div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-300">$1</strong>')}</div>`
       ).join("");
 
-      // Update Chart.js Bar Chart
       const labels = data.customer_behavior.map(c => c.CustomerID);
       const spendData = data.customer_behavior.map(c => c.Total_Spent);
       const clvData = data.customer_behavior.map(c => c.Predicted_6M_CLV);
@@ -229,9 +240,7 @@
         }
       });
 
-      // Update Customer Table
-      const tbody = document.getElementById("customerTableBody");
-      tbody.innerHTML = data.customer_behavior.map(c => {
+      document.getElementById("customerTableBody").innerHTML = data.customer_behavior.map(c => {
         const riskColor = c["Churn_Risk_%"] > 50 ? "bg-rose-500" : c["Churn_Risk_%"] > 15 ? "bg-amber-500" : "bg-emerald-500";
         return `
           <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-800/50 cursor-pointer transition">
@@ -255,9 +264,7 @@
         `;
       }).join("");
 
-      // Update Product Bundles
-      const bundles = document.getElementById("bundleCards");
-      bundles.innerHTML = data.product_recommendations.map(b => `
+      document.getElementById("bundleCards").innerHTML = data.product_recommendations.map(b => `
         <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex justify-between items-center">
           <div>
             <p class="text-sm font-bold text-white">If buying: <span class="text-indigo-400">${b.If_Customer_Buys}</span></p>
@@ -275,6 +282,7 @@
     }
 
     async function inspectCustomer(customerId) {
+      selectedCustomerId = customerId;
       const apiKey = document.getElementById("storeSelector").value;
       const res = await fetch(`/api/customer-360/${encodeURIComponent(customerId)}`, {
         headers: { "x-api-key": apiKey }
@@ -286,13 +294,42 @@
       document.getElementById("c360Meta").innerText = `${c360.orders_count} Total Orders • Last Purchase: ${c360.last_order_date}`;
       document.getElementById("c360Message").value = c360.ready_to_send_message;
 
-      const shapDiv = document.getElementById("c360Shap");
-      shapDiv.innerHTML = c360.shap_explanations.map(s => `
+      document.getElementById("c360Shap").innerHTML = c360.shap_explanations.map(s => `
         <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between text-xs">
           <span class="text-slate-400">${s.Feature}:</span>
           <span class="font-semibold text-indigo-300">${s.Impact}</span>
         </div>
       `).join("");
+    }
+
+    async function uploadUniversalCsv(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const csvText = await file.text();
+      const apiKey = document.getElementById("storeSelector").value;
+
+      const res = await fetch("/api/etl-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+        body: JSON.stringify({ filename: file.name, csvText })
+      });
+      const data = await res.json();
+      const toast = document.getElementById("etlToast");
+      toast.classList.remove("hidden");
+      document.getElementById("etlToastText").innerHTML =
+        `✅ <strong>${data.status}</strong>: Loaded <strong>${data.load_clean_rows_saved} clean rows</strong> (Removed ${data.transform_dirty_rows_removed} bad rows) into Hadoop Data Lake <code>${data.hadoop_data_lake_path}</code>!`;
+      loadStoreData();
+    }
+
+    async function eraseCustomerDpdp() {
+      if (!selectedCustomerId) return;
+      if (!confirm(`Execute India DPDP Act 2023 Right to Erasure for customer "${selectedCustomerId}"?`)) return;
+      const apiKey = document.getElementById("storeSelector").value;
+      await fetch(`/api/privacy/erase/${encodeURIComponent(selectedCustomerId)}`, {
+        method: "DELETE",
+        headers: { "x-api-key": apiKey }
+      });
+      loadStoreData();
     }
 
     function updateSimulator() {
