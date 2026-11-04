@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PulseIQ — E-Commerce Customer Behavior Intelligence</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #090d16; color: #f8fafc; }
+    .glass { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .glass-hover:hover { border-color: rgba(99, 102, 241, 0.5); transform: translateY(-2px); transition: all 0.2s ease; }
+    .gradient-text { background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- TOP NAVBAR -->
+  <header class="glass sticky top-0 z-50 px-6 py-4 flex flex-wrap justify-between items-center border-b border-slate-800">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-extrabold text-xl shadow-lg shadow-indigo-500/30">P</div>
+      <div>
+        <h1 class="text-xl font-extrabold tracking-tight">Pulse<span class="gradient-text">IQ</span> Retailer Intelligence</h1>
+        <p class="text-xs text-slate-400">Powered by Express.js Gateway • FastAPI ML • PySpark & K-Means</p>
+      </div>
+    </div>
+
+    <div class="flex items-center space-x-4 mt-3 sm:mt-0">
+      <div class="flex items-center space-x-2 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2">
+        <span class="text-xs text-slate-400 font-medium">🏪 Active Store:</span>
+        <select id="storeSelector" onchange="loadStoreData()" class="bg-transparent text-sm font-semibold text-indigo-400 focus:outline-none cursor-pointer">
+          <option value="key-store-a-123" class="bg-slate-900 text-white">Toy Kingdom (Tenant: store_a)</option>
+          <option value="key-store-b-456" class="bg-slate-900 text-white">Sneaker World (Tenant: store_b)</option>
+        </select>
+      </div>
+      <span id="tenantBadge" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+        ● Shield Active
+      </span>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
+
+    <!-- KPI ROW -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-indigo-500">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Revenue</p>
+        <h2 id="kpiRevenue" class="text-2xl font-extrabold mt-2 text-white">₹0</h2>
+        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">▲ +18.4% growth</span>
+      </div>
+      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-sky-500">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Customers</p>
+        <h2 id="kpiCustomers" class="text-2xl font-extrabold mt-2 text-white">0</h2>
+        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-sky-500/10 text-sky-400">Multi-Tenant Isolated</span>
+      </div>
+      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-purple-500">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Avg Customer Spend</p>
+        <h2 id="kpiAvgSpend" class="text-2xl font-extrabold mt-2 text-white">₹0</h2>
+        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-purple-500/10 text-purple-400">Per Verified Buyer</span>
+      </div>
+      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-emerald-500">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">VIP Champions</p>
+        <h2 id="kpiVips" class="text-2xl font-extrabold mt-2 text-white">0</h2>
+        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">High CLV Segment</span>
+      </div>
+      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-rose-500">
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">At-Risk (Churn Alert)</p>
+        <h2 id="kpiAtRisk" class="text-2xl font-extrabold mt-2 text-white">0</h2>
+        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-rose-500/10 text-rose-400">Action Required</span>
+      </div>
+    </section>
+
+    <!-- SMART AI STORE REVIEWS + CHARTS -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Left: Automated Retailer Reviews -->
+      <div class="glass rounded-2xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-lg font-bold text-white">🧠 AI Store Advisor Reviews</h3>
+          <span class="text-xs px-2.5 py-1 rounded-md bg-indigo-500/20 text-indigo-300 font-semibold">Auto-Generated</span>
+        </div>
+        <div id="reviewsList" class="space-y-3 text-sm text-slate-300 leading-relaxed"></div>
+      </div>
+
+      <!-- Center: Spend vs Predicted 6M CLV Chart -->
+      <div class="glass rounded-2xl p-6 lg:col-span-2">
+        <h3 class="text-lg font-bold text-white mb-4">📈 Current Spend vs. Predicted 6-Month CLV (₹)</h3>
+        <div class="h-64">
+          <canvas id="clvChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- CUSTOMER BEHAVIOR PLAYBOOK TABLE + 360 INSPECTOR -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Customer Table -->
+      <div class="glass rounded-2xl p-6 lg:col-span-2 overflow-x-auto">
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
+          <div>
+            <h3 class="text-lg font-bold text-white">👥 Customer Behavior Segments & Action Plan</h3>
+            <p class="text-xs text-slate-400">Click any customer row to inspect their 360° profile & generate a WhatsApp campaign</p>
+          </div>
+        </div>
+        <table class="w-full text-left border-collapse text-sm">
+          <thead>
+            <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase">
+              <th class="py-3 px-3">Customer</th>
+              <th class="py-3 px-3">Segment & ML Cluster</th>
+              <th class="py-3 px-3">Spent</th>
+              <th class="py-3 px-3">6M CLV</th>
+              <th class="py-3 px-3">Churn Risk</th>
+              <th class="py-3 px-3">Recommended Retailer Action</th>
+            </tr>
+          </thead>
+          <tbody id="customerTableBody" class="divide-y divide-slate-800/60"></tbody>
+        </table>
+      </div>
+
+      <!-- Right: Customer 360 Inspector & WhatsApp Generator -->
+      <div class="glass rounded-2xl p-6 flex flex-col justify-between space-y-4 border border-indigo-500/30">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">🔍 Customer 360° Deep Dive</span>
+          <h3 id="c360Name" class="text-xl font-extrabold text-white mt-1">Select a customer</h3>
+          <p id="c360Meta" class="text-xs text-slate-400 mt-1">Click any row in the table to inspect SHAP drivers</p>
+
+          <div class="mt-4 space-y-2" id="c360Shap"></div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-800">
+          <label class="text-xs font-semibold text-emerald-400 uppercase">💬 Ready-to-Send WhatsApp / Email Offer:</label>
+          <textarea id="c360Message" rows="4" readonly class="w-full mt-2 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none"></textarea>
+          <button onclick="copyCampaign()" class="mt-2 w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs shadow-lg shadow-indigo-600/30 transition">
+            📋 Copy Personalized Campaign Message
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRODUCT BUNDLE RECOMMENDATIONS & WHAT-IF REVENUE SIMULATOR -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="glass rounded-2xl p-6">
+        <h3 class="text-lg font-bold text-white mb-1">🛍️ Smart Product Bundle Recommendations</h3>
+        <p class="text-xs text-slate-400 mb-4">Frequently bought together rules to increase Average Order Value at checkout</p>
+        <div id="bundleCards" class="space-y-3"></div>
+      </div>
+
+      <div class="glass rounded-2xl p-6 space-y-5">
+        <div>
+          <h3 class="text-lg font-bold text-white">💰 Interactive 'What-If' Revenue Simulator</h3>
+          <p class="text-xs text-slate-400">Simulate 6-month store revenue uplift from retention & cross-sell bundles</p>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <div class="flex justify-between text-xs font-semibold mb-1">
+              <span>Win-Back % of At-Risk Customers:</span>
+              <span id="winbackVal" class="text-indigo-400">40%</span>
+            </div>
+            <input id="winbackSlider" type="range" min="0" max="100" value="40" oninput="updateSimulator()" class="w-full accent-indigo-500 cursor-pointer" />
+          </div>
+          <div>
+            <div class="flex justify-between text-xs font-semibold mb-1">
+              <span>Product Bundle Order Size Uplift %:</span>
+              <span id="bundleVal" class="text-purple-400">15%</span>
+            </div>
+            <input id="bundleSlider" type="range" min="0" max="50" value="15" oninput="updateSimulator()" class="w-full accent-purple-500 cursor-pointer" />
+          </div>
+          <div class="p-4 rounded-xl bg-gradient-to-r from-indigo-950/80 to-purple-950/80 border border-indigo-500/30 flex justify-between items-center">
+            <div>
+              <p class="text-xs text-slate-300">Projected 6-Month Extra Revenue</p>
+              <p id="simNewTotal" class="text-xs text-indigo-300 mt-0.5">New Store Total: ₹0</p>
+            </div>
+            <div id="simGain" class="text-2xl font-extrabold text-emerald-400">+₹0</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    let currentBaseRevenue = 0;
+    let clvChartInstance = null;
+
+    async function loadStoreData() {
+      const apiKey = document.getElementById("storeSelector").value;
+      const res = await fetch("/api/insights", { headers: { "x-api-key": apiKey } });
+      const data = await res.json();
+
+      // Update KPIs
+      currentBaseRevenue = data.kpis.total_revenue;
+      document.getElementById("kpiRevenue").innerText = "₹" + data.kpis.total_revenue.toLocaleString("en-IN");
+      document.getElementById("kpiCustomers").innerText = data.kpis.total_customers;
+      document.getElementById("kpiAvgSpend").innerText = "₹" + data.kpis.avg_spend.toLocaleString("en-IN");
+      document.getElementById("kpiVips").innerText = data.kpis.vip_count;
+      document.getElementById("kpiAtRisk").innerText = data.kpis.at_risk_count;
+      document.getElementById("tenantBadge").innerText = `● ${data.store_name} (${data.tenant_id})`;
+
+      // Update AI Reviews
+      const reviewsContainer = document.getElementById("reviewsList");
+      reviewsContainer.innerHTML = data.store_reviews.map(r =>
+        `<div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-300">$1</strong>')}</div>`
+      ).join("");
+
+      // Update Chart.js Bar Chart
+      const labels = data.customer_behavior.map(c => c.CustomerID);
+      const spendData = data.customer_behavior.map(c => c.Total_Spent);
+      const clvData = data.customer_behavior.map(c => c.Predicted_6M_CLV);
+
+      if (clvChartInstance) clvChartInstance.destroy();
+      const ctx = document.getElementById("clvChart").getContext("2d");
+      clvChartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            { label: "Current Spend (₹)", data: spendData, backgroundColor: "#6366f1", borderRadius: 6 },
+            { label: "Predicted 6M CLV (₹)", data: clvData, backgroundColor: "#06b6d4", borderRadius: 6 }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: "#cbd5e1" } } },
+          scales: {
+            x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
+            y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,0.1)" } }
+          }
+        }
+      });
+
+      // Update Customer Table
+      const tbody = document.getElementById("customerTableBody");
+      tbody.innerHTML = data.customer_behavior.map(c => {
+        const riskColor = c["Churn_Risk_%"] > 50 ? "bg-rose-500" : c["Churn_Risk_%"] > 15 ? "bg-amber-500" : "bg-emerald-500";
+        return `
+          <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-800/50 cursor-pointer transition">
+            <td class="py-3 px-3 font-bold text-white">${c.CustomerID}</td>
+            <td class="py-3 px-3">
+              <span class="font-medium text-slate-200">${c.Segment}</span>
+              <span class="block text-xs text-indigo-400">${c.KMeans_ML_Cluster || 'Cluster 0'}</span>
+            </td>
+            <td class="py-3 px-3 font-semibold text-slate-200">₹${c.Total_Spent.toLocaleString("en-IN")}</td>
+            <td class="py-3 px-3 font-semibold text-cyan-400">₹${c.Predicted_6M_CLV.toLocaleString("en-IN")}</td>
+            <td class="py-3 px-3 w-36">
+              <div class="flex items-center space-x-2">
+                <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div class="${riskColor} h-2 rounded-full" style="width: ${c['Churn_Risk_%']}%"></div>
+                </div>
+                <span class="text-xs font-bold">${c["Churn_Risk_%"]}%</span>
+              </div>
+            </td>
+            <td class="py-3 px-3 text-xs text-slate-300">${c.Recommended_Retailer_Action}</td>
+          </tr>
+        `;
+      }).join("");
+
+      // Update Product Bundles
+      const bundles = document.getElementById("bundleCards");
+      bundles.innerHTML = data.product_recommendations.map(b => `
+        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex justify-between items-center">
+          <div>
+            <p class="text-sm font-bold text-white">If buying: <span class="text-indigo-400">${b.If_Customer_Buys}</span></p>
+            <p class="text-xs text-emerald-400 font-semibold mt-0.5">➔ Recommend: ${b.Also_Recommend}</p>
+            <p class="text-xs text-slate-400 mt-1">${b.Why_It_Works}</p>
+          </div>
+          <span class="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-bold text-xs">${b.Confidence} Match</span>
+        </div>
+      `).join("");
+
+      updateSimulator();
+      if (data.customer_behavior.length > 0) {
+        inspectCustomer(data.customer_behavior[0].CustomerID);
+      }
+    }
+
+    async function inspectCustomer(customerId) {
+      const apiKey = document.getElementById("storeSelector").value;
+      const res = await fetch(`/api/customer-360/${encodeURIComponent(customerId)}`, {
+        headers: { "x-api-key": apiKey }
+      });
+      if (!res.ok) return;
+      const c360 = await res.json();
+
+      document.getElementById("c360Name").innerText = `${c360.customer_id} — ₹${c360.total_spent.toLocaleString("en-IN")}`;
+      document.getElementById("c360Meta").innerText = `${c360.orders_count} Total Orders • Last Purchase: ${c360.last_order_date}`;
+      document.getElementById("c360Message").value = c360.ready_to_send_message;
+
+      const shapDiv = document.getElementById("c360Shap");
+      shapDiv.innerHTML = c360.shap_explanations.map(s => `
+        <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between text-xs">
+          <span class="text-slate-400">${s.Feature}:</span>
+          <span class="font-semibold text-indigo-300">${s.Impact}</span>
+        </div>
+      `).join("");
+    }
+
+    function updateSimulator() {
+      const winback = parseInt(document.getElementById("winbackSlider").value);
+      const bundle = parseInt(document.getElementById("bundleSlider").value);
+      document.getElementById("winbackVal").innerText = winback + "%";
+      document.getElementById("bundleVal").innerText = bundle + "%";
+
+      const gain = Math.round(currentBaseRevenue * (winback / 100 * 0.25) + currentBaseRevenue * (bundle / 100));
+      document.getElementById("simGain").innerText = "+₹" + gain.toLocaleString("en-IN");
+      document.getElementById("simNewTotal").innerText = "New Store Total: ₹" + (currentBaseRevenue + gain).toLocaleString("en-IN");
+    }
+
+    function copyCampaign() {
+      const msg = document.getElementById("c360Message");
+      msg.select();
+      navigator.clipboard.writeText(msg.value);
+      alert("Copied personalized campaign message to clipboard!");
+    }
+
+    window.onload = loadStoreData;
+  </script>
+</body>
+</html>
