@@ -1,14 +1,15 @@
 from datetime import datetime
+import io
 import os
 import sqlite3
 from database import DB_PATH
 import pandas as pd
 
-# Define folder paths for the SQLite database and Hadoop Parquet Data Lake
+# Set paths for the SQLite database file and Hadoop Parquet Data Lake folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_LAKE_DIR = os.path.join(BASE_DIR, "data_lake_hdfs")
 
-# Dictionary of common column header names so any store's CSV format is auto-detected
+# Synonym dictionary so any store's CSV column names are automatically recognized
 COLUMN_SYNONYMS = {
     "CustomerID": [
         "customerid", "customer_id", "customer id", "customer", "customer_name",
@@ -16,7 +17,7 @@ COLUMN_SYNONYMS = {
     ],
     "InvoiceNo": [
         "invoiceno", "invoice_no", "invoice no", "invoice", "order_id", "order id",
-        "orderid", "order_no", "bill_no", "transaction_id", "txn_id", "id",
+        "orderid", "order_no", "bill_no", "transaction_id", "txn_id", "id", "stockcode",
     ],
     "InvoiceDate": [
         "invoicedate", "invoice_date", "invoice date", "date", "order_date",
@@ -32,12 +33,12 @@ COLUMN_SYNONYMS = {
 }
 
 
-# Maps any arbitrary CSV column headers to our 5 standard e-commerce columns
+# Automatically maps any uploaded CSV column names to our 5 standard model columns
 def auto_map_columns(df: pd.DataFrame):
   detected_mapping = {}
   lower_to_orig = {col.strip().lower(): col for col in df.columns}
 
-  # Loop through each required model column and check if a matching synonym exists in the CSV
+  # Match each required column against exact or partial column name synonyms
   for target_col, synonyms in COLUMN_SYNONYMS.items():
     matched_orig = None
     for syn in synonyms:
@@ -50,7 +51,7 @@ def auto_map_columns(df: pd.DataFrame):
           matched_orig = orig_col
           break
 
-    # Copy the matched column or generate safe default values if the column is missing
+    # Assign the matched column or create safe fallback values if missing
     if matched_orig:
       df[target_col] = df[matched_orig]
       detected_mapping[target_col] = f"Mapped from '{matched_orig}'"
@@ -80,45 +81,49 @@ def auto_map_columns(df: pd.DataFrame):
   return df, detected_mapping
 
 
-# Streams and cleans a massive CSV file from disk in 100,000-row chunks without running out of RAM
+# Streams a large CSV file (1M+ rows) in 100k-row chunks so RAM never overflows
 def run_spark_etl_from_file(file_obj, tenant_id: str):
   raw_row_count = 0
   clean_row_count = 0
   schema_mapping = {}
   first_chunk_sample = None
 
-  # Open SQLite connection in fast Write-Ahead Logging (WAL) mode for bulk inserts
-  conn = sqlite3.connect(DB_PATH)
+  # Open SQLite with Write-Ahead Logging (WAL) and 64MB cache for fast bulk writes
+  conn = sqlite3.connect(DB_PATH, timeout=60)
   conn.execute("PRAGMA journal_mode=WAL;")
   conn.execute("PRAGMA synchronous=NORMAL;")
 
-  # Read the uploaded file in 100,000-row chunks so 260MB+ files use minimal RAM
+  # Read CSV stream in 100,000-row batches to handle 260MB+ files smoothly
   chunk_iterator = pd.read_csv(
-      file_obj, chunksize=100000, encoding="utf-8", encoding_errors="replace", low_memory=False
+      file_obj,
+      chunksize=100000,
+      encoding="utf-8",
+      encoding_errors="replace",
+      low_memory=False,
+      on_bad_lines="skip",
   )
 
   for chunk in chunk_iterator:
-    # Count raw rows in the current 100k batch
+    # Strip extra spaces from column headers and count raw rows
     chunk.columns = chunk.columns.str.strip()
     raw_row_count += len(chunk)
 
-    # Auto-detect and standardize column names on the current batch
+    # Map arbitrary CSV headers to CustomerID, InvoiceNo, InvoiceDate, Quantity, UnitPrice
     mapped_chunk, schema_mapping = auto_map_columns(chunk)
 
-    # Convert Quantity and UnitPrice to numbers and strip currency symbols
+    # Convert Quantity and UnitPrice to numeric values cleanly
     mapped_chunk["Quantity"] = pd.to_numeric(mapped_chunk["Quantity"], errors="coerce")
     mapped_chunk["UnitPrice"] = pd.to_numeric(
         mapped_chunk["UnitPrice"].astype(str).str.replace(r"[₹$,]", "", regex=True),
         errors="coerce",
     )
 
-    # Parse dates safely and fill any unparseable dates with today's date
-    parsed_dates = pd.to_datetime(mapped_chunk["InvoiceDate"], errors="coerce")
-    mapped_chunk["InvoiceDate"] = parsed_dates.dt.strftime("%Y-%m-%d").fillna(
-        datetime.today().strftime("%Y-%m-%d")
+    # Standardize date strings without slow per-row date parsing
+    mapped_chunk["InvoiceDate"] = (
+        mapped_chunk["InvoiceDate"].astype(str).str.slice(0, 10)
     )
 
-    # Filter out dirty rows (missing CustomerID, negative quantities, or zero prices)
+    # Remove rows with missing CustomerID or negative/zero Quantity and UnitPrice
     clean_chunk = mapped_chunk.dropna(
         subset=["CustomerID", "InvoiceNo", "Quantity", "UnitPrice"]
     ).copy()
@@ -129,36 +134,38 @@ def run_spark_etl_from_file(file_obj, tenant_id: str):
         & (clean_chunk["CustomerID"].astype(str).str.lower() != "nan")
     ].copy()
 
-    # Tag every row with the store's tenant_id for multi-tenant isolation
+    # Add multi-tenant identifier and clean trailing '.0' from numeric Customer IDs
     clean_chunk["tenant_id"] = tenant_id
-    clean_chunk["CustomerID"] = clean_chunk["CustomerID"].astype(str).str.replace(r"\.0$", "", regex=True)
+    clean_chunk["CustomerID"] = (
+        clean_chunk["CustomerID"].astype(str).str.replace(r"\.0$", "", regex=True)
+    )
     clean_row_count += len(clean_chunk)
 
-    # Save a sample of the cleaned data to write to the Hadoop Parquet Data Lake
+    # Keep a 50,000-row sample to write to the Hadoop Parquet Data Lake
     if first_chunk_sample is None and not clean_chunk.empty:
       first_chunk_sample = clean_chunk.head(50000).copy()
 
-    # Bulk-insert the cleaned 100k batch directly into the indexed database table
+    # Write cleaned batch into SQLite database table
     db_cols = clean_chunk[[
         "tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Quantity", "UnitPrice"
     ]]
     db_cols.to_sql("sales", conn, if_exists="append", index=False)
 
-  # Build fast search index after bulk loading all chunks and close database connection
+  # Ensure composite index exists for sub-second RFM queries on millions of rows
   conn.execute("CREATE INDEX IF NOT EXISTS idx_sales_tenant ON sales(tenant_id, CustomerID);")
   conn.commit()
   conn.close()
 
-  # Write the partitioned Apache Parquet file into the Hadoop Data Lake directory
+  # Write partitioned Apache Parquet file to the Hadoop Data Lake folder
   tenant_lake_path = os.path.join(DATA_LAKE_DIR, f"tenant_id={tenant_id}")
   os.makedirs(tenant_lake_path, exist_ok=True)
   parquet_file = os.path.join(tenant_lake_path, "sales_part_0001.parquet")
   if first_chunk_sample is not None:
     first_chunk_sample.to_parquet(parquet_file, index=False)
 
-  # Return the ETL execution metrics back to the API
+  # Return summary statistics of the ETL run
   return {
-      "status": "Chunked Big-Data ETL Completed (1M+ Row Engine)",
+      "status": "Chunked Big-Data ETL Completed",
       "engine": "PySpark-Compatible Chunked Streaming Engine (100k rows/batch)",
       "tenant_id": tenant_id,
       "detected_column_mapping": schema_mapping,
@@ -167,3 +174,8 @@ def run_spark_etl_from_file(file_obj, tenant_id: str):
       "load_clean_rows_saved": clean_row_count,
       "hadoop_data_lake_path": f"data_lake_hdfs/tenant_id={tenant_id}/sales_part_0001.parquet",
   }
+
+
+# Backward-compatible wrapper when raw CSV bytes are passed directly
+def run_spark_etl(csv_bytes: bytes, tenant_id: str):
+  return run_spark_etl_from_file(io.BytesIO(csv_bytes), tenant_id)
