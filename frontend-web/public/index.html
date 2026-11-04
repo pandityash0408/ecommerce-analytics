@@ -1,22 +1,27 @@
 <!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
+  <!-- Set character encoding and responsive viewport for all screen sizes -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PulseIQ — E-Commerce Customer Behavior Intelligence</title>
+
+  <!-- Load Tailwind CSS for dark-mode styling and Chart.js for interactive charts -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Define custom glassmorphism card styles and gradient text effects -->
   <style>
     body { font-family: 'Inter', sans-serif; background-color: #090d16; color: #f8fafc; }
-    .glass { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    .glass { background: rgba(15, 23, 42, 0.78); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
     .glass-hover:hover { border-color: rgba(99, 102, 241, 0.5); transform: translateY(-2px); transition: all 0.2s ease; }
     .gradient-text { background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
   </style>
 </head>
 <body class="min-h-screen flex flex-col">
 
-  <!-- TOP NAVBAR -->
+  <!-- TOP NAVIGATION BAR: Brand Logo, CSV Upload Button, Store Switcher, and Active Tenant Badge -->
   <header class="glass sticky top-0 z-50 px-6 py-4 flex flex-wrap justify-between items-center border-b border-slate-800">
     <div class="flex items-center space-x-3">
       <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-extrabold text-xl shadow-lg shadow-indigo-500/30">P</div>
@@ -27,11 +32,13 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-3 mt-3 sm:mt-0">
-      <label class="cursor-pointer px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition">
-        📤 Upload Any Sales CSV (Spark ETL)
+      <!-- File Upload Trigger: Streams any size CSV directly to the backend ETL engine -->
+      <label class="cursor-pointer px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition">
+        📤 Upload Any Sales CSV (1M+ Rows)
         <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="uploadUniversalCsv(event)" />
       </label>
 
+      <!-- Multi-Tenant Store Switcher Dropdown -->
       <div class="flex items-center space-x-2 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2">
         <span class="text-xs text-slate-400 font-medium">🏪 Store:</span>
         <select id="storeSelector" onchange="loadStoreData()" class="bg-transparent text-sm font-semibold text-indigo-400 focus:outline-none cursor-pointer">
@@ -40,24 +47,31 @@
         </select>
       </div>
 
-      <span id="tenantBadge" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-        ● Shield Active
+      <!-- Live Store Connection Status Badge -->
+      <span id="tenantBadge" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        ⏳ Connecting to Store...
       </span>
     </div>
   </header>
 
-  <!-- ETL NOTIFICATION BANNER (Hidden until CSV upload) -->
+  <!-- LIVE ETL PROGRESS & STATUS BANNER (Hidden until a CSV file is uploaded) -->
   <div id="etlToast" class="hidden max-w-7xl w-full mx-auto px-6 pt-4">
-    <div class="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-xs text-emerald-200 flex justify-between items-center">
-      <div id="etlToastText"></div>
-      <button onclick="document.getElementById('etlToast').classList.add('hidden')" class="text-emerald-400 font-bold ml-4">✕</button>
+    <div class="p-4 rounded-2xl bg-slate-900/95 border border-indigo-500/40 text-xs text-slate-200 space-y-2">
+      <div class="flex justify-between items-center">
+        <div id="etlToastText" class="font-medium"></div>
+        <button onclick="document.getElementById('etlToast').classList.add('hidden')" class="text-slate-400 hover:text-white font-bold ml-4">✕</button>
+      </div>
+      <!-- Visual Progress Bar for 260MB+ CSV Uploads -->
+      <div id="etlProgressWrapper" class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+        <div id="etlProgressBar" class="bg-gradient-to-r from-indigo-500 to-emerald-400 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
     </div>
   </div>
 
-  <!-- MAIN CONTENT CONTAINER -->
+  <!-- MAIN DASHBOARD BODY -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
 
-    <!-- KPI ROW -->
+    <!-- SECTION 1: 5 EXECUTIVE STORE KPI CARDS -->
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
       <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-indigo-500">
         <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Revenue</p>
@@ -75,7 +89,7 @@
         <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-purple-500/10 text-purple-400">Per Verified Buyer</span>
       </div>
       <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-emerald-500">
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">VIP Champions</p>
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">VIP Champions (Top 200)</p>
         <h2 id="kpiVips" class="text-2xl font-extrabold mt-2 text-white">0</h2>
         <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">High CLV Segment</span>
       </div>
@@ -86,7 +100,7 @@
       </div>
     </section>
 
-    <!-- SMART AI STORE REVIEWS + CHARTS -->
+    <!-- SECTION 2: AUTOMATED AI STORE REVIEWS & TOP 15 CUSTOMER CLV CHART -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="glass rounded-2xl p-6 space-y-4">
         <div class="flex items-center justify-between">
@@ -97,37 +111,49 @@
       </div>
 
       <div class="glass rounded-2xl p-6 lg:col-span-2">
-        <h3 class="text-lg font-bold text-white mb-4">📈 Current Spend vs. Predicted 6-Month CLV (₹)</h3>
+        <h3 class="text-lg font-bold text-white mb-4">📈 Top Customers: Current Spend vs. Predicted 6-Month CLV (₹)</h3>
         <div class="h-64">
           <canvas id="clvChart"></canvas>
         </div>
       </div>
     </section>
 
-    <!-- CUSTOMER BEHAVIOR PLAYBOOK TABLE + 360 INSPECTOR -->
+    <!-- SECTION 3: INTERACTIVE CUSTOMER BEHAVIOR TABLE & CUSTOMER 360 INSPECTOR -->
     <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="glass rounded-2xl p-6 lg:col-span-2 overflow-x-auto">
-        <div class="flex flex-wrap justify-between items-center mb-4 gap-2">
+        <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
           <div>
             <h3 class="text-lg font-bold text-white">👥 Customer Behavior Segments & Action Plan</h3>
-            <p class="text-xs text-slate-400">Click any customer row to inspect their 360° profile & generate a WhatsApp campaign</p>
+            <p class="text-xs text-slate-400">Showing Top 100 Customers • Click any row to inspect their 360° profile</p>
           </div>
+          <!-- Live Search Input to filter customers by ID or Segment -->
+          <input
+            type="text"
+            id="customerSearch"
+            oninput="filterCustomerTable()"
+            placeholder="🔍 Search customer or segment..."
+            class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+          />
         </div>
-        <table class="w-full text-left border-collapse text-sm">
-          <thead>
-            <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase">
-              <th class="py-3 px-3">Customer</th>
-              <th class="py-3 px-3">Segment & ML Cluster</th>
-              <th class="py-3 px-3">Spent</th>
-              <th class="py-3 px-3">6M CLV</th>
-              <th class="py-3 px-3">Churn Risk</th>
-              <th class="py-3 px-3">Recommended Retailer Action</th>
-            </tr>
-          </thead>
-          <tbody id="customerTableBody" class="divide-y divide-slate-800/60"></tbody>
-        </table>
+
+        <div class="max-h-96 overflow-y-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead class="sticky top-0 bg-slate-900/95">
+              <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase">
+                <th class="py-3 px-3">Customer</th>
+                <th class="py-3 px-3">Segment & ML Cluster</th>
+                <th class="py-3 px-3">Spent</th>
+                <th class="py-3 px-3">6M CLV</th>
+                <th class="py-3 px-3">Churn Risk</th>
+                <th class="py-3 px-3">Recommended Retailer Action</th>
+              </tr>
+            </thead>
+            <tbody id="customerTableBody" class="divide-y divide-slate-800/60"></tbody>
+          </table>
+        </div>
       </div>
 
+      <!-- Right Column: Customer 360 SHAP Inspector & WhatsApp Campaign Generator -->
       <div class="glass rounded-2xl p-6 flex flex-col justify-between space-y-4 border border-indigo-500/30">
         <div>
           <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">🔍 Customer 360° Deep Dive</span>
@@ -151,7 +177,7 @@
       </div>
     </section>
 
-    <!-- PRODUCT BUNDLE RECOMMENDATIONS & WHAT-IF REVENUE SIMULATOR -->
+    <!-- SECTION 4: PRODUCT BUNDLE RECOMMENDATIONS & WHAT-IF REVENUE SIMULATOR -->
     <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="glass rounded-2xl p-6">
         <h3 class="text-lg font-bold text-white mb-1">🛍️ Smart Product Bundle Recommendations</h3>
@@ -192,55 +218,103 @@
 
   </main>
 
+  <!-- FRONTEND APPLICATION JAVASCRIPT -->
   <script>
+    // Global state variables for revenue simulator, customer list, and Chart.js instance
     let currentBaseRevenue = 0;
     let selectedCustomerId = "";
+    let allCustomersCache = [];
     let clvChartInstance = null;
 
-    async function loadStoreData() {
+    // Fetches store insights from the backend and automatically retries if the container is still starting
+    async function loadStoreData(retryCount = 0) {
       const apiKey = document.getElementById("storeSelector").value;
-      const res = await fetch("/api/insights", { headers: { "x-api-key": apiKey } });
-      const data = await res.json();
+      const badge = document.getElementById("tenantBadge");
 
-      currentBaseRevenue = data.kpis.total_revenue;
-      document.getElementById("kpiRevenue").innerText = "₹" + data.kpis.total_revenue.toLocaleString("en-IN");
-      document.getElementById("kpiCustomers").innerText = data.kpis.total_customers;
-      document.getElementById("kpiAvgSpend").innerText = "₹" + data.kpis.avg_spend.toLocaleString("en-IN");
-      document.getElementById("kpiVips").innerText = data.kpis.vip_count;
-      document.getElementById("kpiAtRisk").innerText = data.kpis.at_risk_count;
-      document.getElementById("tenantBadge").innerText = `● ${data.store_name} (${data.tenant_id})`;
+      try {
+        const res = await fetch("/api/insights", { headers: { "x-api-key": apiKey } });
+        if (!res.ok) throw new Error("Backend waking up");
+        const data = await res.json();
 
-      document.getElementById("reviewsList").innerHTML = data.store_reviews.map(r =>
-        `<div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-300">$1</strong>')}</div>`
-      ).join("");
+        // Update Top KPI Cards with formatted Indian Rupee numbers
+        currentBaseRevenue = data.kpis.total_revenue || 0;
+        document.getElementById("kpiRevenue").innerText = "₹" + currentBaseRevenue.toLocaleString("en-IN");
+        document.getElementById("kpiCustomers").innerText = (data.kpis.total_customers || 0).toLocaleString("en-IN");
+        document.getElementById("kpiAvgSpend").innerText = "₹" + (data.kpis.avg_spend || 0).toLocaleString("en-IN");
+        document.getElementById("kpiVips").innerText = data.kpis.vip_count || 0;
+        document.getElementById("kpiAtRisk").innerText = data.kpis.at_risk_count || 0;
 
-      const labels = data.customer_behavior.map(c => c.CustomerID);
-      const spendData = data.customer_behavior.map(c => c.Total_Spent);
-      const clvData = data.customer_behavior.map(c => c.Predicted_6M_CLV);
+        // Update top-right badge to show the active Store Name and Tenant ID
+        badge.className = "px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+        badge.innerText = `● ${data.store_name} (${data.tenant_id})`;
 
-      if (clvChartInstance) clvChartInstance.destroy();
-      const ctx = document.getElementById("clvChart").getContext("2d");
-      clvChartInstance = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [
-            { label: "Current Spend (₹)", data: spendData, backgroundColor: "#6366f1", borderRadius: 6 },
-            { label: "Predicted 6M CLV (₹)", data: clvData, backgroundColor: "#06b6d4", borderRadius: 6 }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { labels: { color: "#cbd5e1" } } },
-          scales: {
-            x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
-            y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,0.1)" } }
+        // Render plain-English AI Store Advisor review cards
+        document.getElementById("reviewsList").innerHTML = (data.store_reviews || []).map(r =>
+          `<div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-300">$1</strong>')}</div>`
+        ).join("");
+
+        // Slice top 15 customers for Chart.js so the chart stays crisp even with 1M+ rows
+        allCustomersCache = data.customer_behavior || [];
+        const top15 = allCustomersCache.slice(0, 15);
+        const labels = top15.map(c => c.CustomerID);
+        const spendData = top15.map(c => c.Total_Spent);
+        const clvData = top15.map(c => c.Predicted_6M_CLV);
+
+        if (clvChartInstance) clvChartInstance.destroy();
+        const ctx = document.getElementById("clvChart").getContext("2d");
+        clvChartInstance = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              { label: "Current Spend (₹)", data: spendData, backgroundColor: "#6366f1", borderRadius: 6 },
+              { label: "Predicted 6M CLV (₹)", data: clvData, backgroundColor: "#06b6d4", borderRadius: 6 }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: "#cbd5e1" } } },
+            scales: {
+              x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
+              y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,0.1)" } }
+            }
           }
-        }
-      });
+        });
 
-      document.getElementById("customerTableBody").innerHTML = data.customer_behavior.map(c => {
+        // Render the customer table and product bundles
+        renderCustomerRows(allCustomersCache);
+
+        document.getElementById("bundleCards").innerHTML = (data.product_recommendations || []).map(b => `
+          <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex justify-between items-center">
+            <div>
+              <p class="text-sm font-bold text-white">If buying: <span class="text-indigo-400">${b.If_Customer_Buys}</span></p>
+              <p class="text-xs text-emerald-400 font-semibold mt-0.5">➔ Recommend: ${b.Also_Recommend}</p>
+              <p class="text-xs text-slate-400 mt-1">${b.Why_It_Works}</p>
+            </div>
+            <span class="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-bold text-xs">${b.Confidence} Match</span>
+          </div>
+        `).join("");
+
+        updateSimulator();
+        if (allCustomersCache.length > 0) {
+          inspectCustomer(allCustomersCache[0].CustomerID);
+        }
+      } catch (err) {
+        // Retry up to 10 times (1.5s apart) if the FastAPI container is still booting up
+        if (retryCount < 10) {
+          badge.innerText = `⏳ Waking up AI Engine (${retryCount + 1}/10)...`;
+          setTimeout(() => loadStoreData(retryCount + 1), 1500);
+        } else {
+          badge.className = "px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20";
+          badge.innerText = "🚨 Backend Offline (Run .\\start.bat)";
+        }
+      }
+    }
+
+    // Renders customer rows into the HTML table with color-coded churn risk progress bars
+    function renderCustomerRows(customers) {
+      document.getElementById("customerTableBody").innerHTML = customers.map(c => {
         const riskColor = c["Churn_Risk_%"] > 50 ? "bg-rose-500" : c["Churn_Risk_%"] > 15 ? "bg-amber-500" : "bg-emerald-500";
         return `
           <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-800/50 cursor-pointer transition">
@@ -263,24 +337,19 @@
           </tr>
         `;
       }).join("");
-
-      document.getElementById("bundleCards").innerHTML = data.product_recommendations.map(b => `
-        <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex justify-between items-center">
-          <div>
-            <p class="text-sm font-bold text-white">If buying: <span class="text-indigo-400">${b.If_Customer_Buys}</span></p>
-            <p class="text-xs text-emerald-400 font-semibold mt-0.5">➔ Recommend: ${b.Also_Recommend}</p>
-            <p class="text-xs text-slate-400 mt-1">${b.Why_It_Works}</p>
-          </div>
-          <span class="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-bold text-xs">${b.Confidence} Match</span>
-        </div>
-      `).join("");
-
-      updateSimulator();
-      if (data.customer_behavior.length > 0) {
-        inspectCustomer(data.customer_behavior[0].CustomerID);
-      }
     }
 
+    // Filters the displayed customer table rows based on the search box input
+    function filterCustomerTable() {
+      const q = document.getElementById("customerSearch").value.toLowerCase();
+      const filtered = allCustomersCache.filter(c =>
+        String(c.CustomerID).toLowerCase().includes(q) ||
+        String(c.Segment).toLowerCase().includes(q)
+      );
+      renderCustomerRows(filtered);
+    }
+
+    // Loads a single customer's 360° order history, SHAP drivers, and WhatsApp offer
     async function inspectCustomer(customerId) {
       selectedCustomerId = customerId;
       const apiKey = document.getElementById("storeSelector").value;
@@ -291,7 +360,7 @@
       const c360 = await res.json();
 
       document.getElementById("c360Name").innerText = `${c360.customer_id} — ₹${c360.total_spent.toLocaleString("en-IN")}`;
-      document.getElementById("c360Meta").innerText = `${c360.orders_count} Total Orders • Last Purchase: ${c360.last_order_date}`;
+      document.getElementById("c360Meta").innerText = `${c360.orders_count} Orders • Last Purchase: ${c360.last_order_date}`;
       document.getElementById("c360Message").value = c360.ready_to_send_message;
 
       document.getElementById("c360Shap").innerHTML = c360.shap_explanations.map(s => `
@@ -302,45 +371,56 @@
       `).join("");
     }
 
-   // Streams large CSV files (260MB+ / 1M+ rows) directly from disk to FastAPI without loading into Chrome RAM
-    async function uploadUniversalCsv(event) {
-      // Grab the selected CSV file reference from the file input element
+    // Streams large CSV files (260MB+ / 1M+ rows) with a live upload percentage bar
+    function uploadUniversalCsv(event) {
       const file = event.target.files[0];
       if (!file) return;
 
-      // Read the currently selected store's API Key from the navbar dropdown
       const apiKey = document.getElementById("storeSelector").value;
       const toast = document.getElementById("etlToast");
       const toastText = document.getElementById("etlToastText");
+      const progressBar = document.getElementById("etlProgressBar");
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
 
-      // Show a live progress banner so the user knows the 1M-row file is streaming
       toast.classList.remove("hidden");
-      toastText.innerHTML = `⏳ <strong>Streaming ${(file.size / (1024 * 1024)).toFixed(1)} MB file (${file.name})</strong> directly to Spark ETL Engine... Please wait 10-20 seconds...`;
+      progressBar.style.width = "5%";
+      toastText.innerHTML = `⏳ Uploading <strong>${file.name} (${sizeMB} MB)</strong> to Chunked Spark ETL Engine...`;
 
-      // Pack the file as a binary multipart stream (uses zero browser RAM!)
       const formData = new FormData();
       formData.append("file", file);
 
-      try {
-        // Send the binary stream directly to FastAPI port 8000 to bypass JSON memory limits
-        const res = await fetch("http://localhost:8000/etl/upload", {
-          method: "POST",
-          headers: { "X-API-Key": apiKey },
-          body: formData
-        });
-        const data = await res.json();
+      // Use XMLHttpRequest to track real-time upload progress for 260MB+ files
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${window.location.protocol}//${window.location.hostname}:8000/etl/upload`, true);
+      xhr.setRequestHeader("X-API-Key", apiKey);
 
-        // Display the completed ETL row counts and Hadoop Parquet path in the banner
-        toastText.innerHTML =
-          `✅ <strong>${data.status}</strong>: Processed <strong>${data.extract_raw_rows.toLocaleString()} raw rows</strong> ➔ Saved <strong>${data.load_clean_rows_saved.toLocaleString()} clean rows</strong> (Removed ${data.transform_dirty_rows_removed.toLocaleString()} bad rows) into <code>${data.hadoop_data_lake_path}</code>!`;
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 85);
+          progressBar.style.width = pct + "%";
+          toastText.innerHTML = `⏳ Streaming <strong>${file.name} (${sizeMB} MB)</strong>: ${pct}% uploaded... Cleaning & indexing chunks in SQLite WAL...`;
+        }
+      };
 
-        // Refresh the dashboard charts and KPIs with the newly loaded million-row dataset
-        loadStoreData();
-      } catch (err) {
-        // Show an error message if the upload connection fails
-        toastText.innerHTML = `🚨 Upload Error: ${err.message}`;
-      }
+      xhr.onload = function () {
+        if (xhr.status === 200) {
+          const data = JSON.parse(xhr.responseText);
+          progressBar.style.width = "100%";
+          toastText.innerHTML = `✅ <strong>${data.status}</strong>: Processed <strong>${data.extract_raw_rows.toLocaleString()} raw rows</strong> ➔ Saved <strong>${data.load_clean_rows_saved.toLocaleString()} clean rows</strong> (Removed ${data.transform_dirty_rows_removed.toLocaleString()} bad rows) into <code>${data.hadoop_data_lake_path}</code>!`;
+          loadStoreData();
+        } else {
+          toastText.innerHTML = `🚨 ETL Error (${xhr.status}): ${xhr.responseText}`;
+        }
+      };
+
+      xhr.onerror = function () {
+        toastText.innerHTML = `🚨 Upload connection failed. Make sure ecommerce-backend container is running on port 8000!`;
+      };
+
+      xhr.send(formData);
     }
+
+    // Deletes a customer's records to comply with India DPDP Act 2023 Right to Erasure
     async function eraseCustomerDpdp() {
       if (!selectedCustomerId) return;
       if (!confirm(`Execute India DPDP Act 2023 Right to Erasure for customer "${selectedCustomerId}"?`)) return;
@@ -352,6 +432,7 @@
       loadStoreData();
     }
 
+    // Calculates projected 6-month revenue gain when the user moves the What-If sliders
     function updateSimulator() {
       const winback = parseInt(document.getElementById("winbackSlider").value);
       const bundle = parseInt(document.getElementById("bundleSlider").value);
@@ -363,6 +444,7 @@
       document.getElementById("simNewTotal").innerText = "New Store Total: ₹" + (currentBaseRevenue + gain).toLocaleString("en-IN");
     }
 
+    // Copies the generated WhatsApp/Email retention offer to the user's clipboard
     function copyCampaign() {
       const msg = document.getElementById("c360Message");
       msg.select();
@@ -370,7 +452,8 @@
       alert("Copied personalized campaign message to clipboard!");
     }
 
-    window.onload = loadStoreData;
+    // Automatically load the default store's data as soon as the webpage opens
+    window.onload = () => loadStoreData(0);
   </script>
 </body>
 </html>
