@@ -406,8 +406,9 @@
         if (xhr.status === 200) {
           const data = JSON.parse(xhr.responseText);
           progressBar.style.width = "100%";
-          toastText.innerHTML = `✅ <strong>${data.status}</strong>: Processed <strong>${data.extract_raw_rows.toLocaleString()} raw rows</strong> ➔ Saved <strong>${data.load_clean_rows_saved.toLocaleString()} clean rows</strong> (Removed ${data.transform_dirty_rows_removed.toLocaleString()} bad rows) into <code>${data.hadoop_data_lake_path}</code>!`;
-          loadStoreData();
+          toastText.innerHTML = `✅ Created Store <strong>${data.store_name}</strong> (<code>${data.tenant_id}</code>): Processed <strong>${data.extract_raw_rows.toLocaleString()} raw rows</strong> ➔ Saved <strong>${data.load_clean_rows_saved.toLocaleString()} clean rows</strong>!`;
+          // Add the new store to the navbar dropdown and switch to it immediately!
+          refreshStoresDropdown(data.api_key).then(() => loadStoreData());
         } else {
           toastText.innerHTML = `🚨 ETL Error (${xhr.status}): ${xhr.responseText}`;
         }
@@ -472,7 +473,8 @@
     }
     
     // Automatically load the default store's data as soon as the webpage opens
-    window.onload = () => loadStoreData(0);
+   // Load all saved stores into the dropdown and then load the active store's dashboard
+    window.onload = () => refreshStoresDropdown().then(() => loadStoreData(0));
   </script>
 </body>
 </html>
