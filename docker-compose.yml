@@ -1,11 +1,15 @@
 services:
+  # FastAPI Backend service with a persistent volume mount so uploaded datasets are saved permanently
   backend:
     build: ./backend
     container_name: ecommerce-backend
     ports:
       - "8000:8000"
+    volumes:
+      - ./backend:/app
     restart: always
 
+  # Express.js Minimal Enterprise Web Dashboard service on port 3000
   frontend-web:
     build: ./frontend-web
     container_name: ecommerce-express-web
