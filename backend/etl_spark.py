@@ -3,6 +3,7 @@ import io
 import os
 import re
 import sqlite3
+import zipfile
 from database import DB_PATH
 import pandas as pd
 
@@ -10,7 +11,7 @@ import pandas as pd
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_LAKE_DIR = os.path.join(BASE_DIR, "data_lake_hdfs")
 
-# Synonym dictionary so any store's CSV column names are automatically recognized
+# Synonym dictionary so any store's column names are automatically recognized across all file formats
 COLUMN_SYNONYMS = {
     "CustomerID": [
         "customerid", "customer_id", "customer id", "customer", "customer_name",
@@ -34,11 +35,11 @@ COLUMN_SYNONYMS = {
 }
 
 
-# Auto-detects a human-friendly Store Name from CSV columns (Store/Brand/Country) or the filename
+# Auto-detects a human-friendly Store Name from data columns (Store/Brand/Country) or the filename
 def detect_store_from_csv(first_chunk: pd.DataFrame, filename: str):
-  lower_cols = {c.strip().lower(): c for c in first_chunk.columns}
+  lower_cols = {str(c).strip().lower(): c for c in first_chunk.columns}
 
-  # 1. Check if the CSV has an explicit store/merchant/shop/brand column
+  # 1. Check if the dataset has an explicit store, merchant, shop, or brand column
   for candidate in ["store_name", "store", "merchant", "shop", "brand", "seller"]:
     if candidate in lower_cols:
       val = str(first_chunk[lower_cols[candidate]].dropna().iloc[0]).strip()
@@ -46,8 +47,9 @@ def detect_store_from_csv(first_chunk: pd.DataFrame, filename: str):
         clean_name = val.title()
         break
   else:
-    # 2. Otherwise build a clean Store Name from the uploaded CSV filename (and top Country if present)
-    base_name = os.path.splitext(os.path.basename(filename or "New_Store"))[0]
+    # 2. Otherwise build a clean Store Name from the uploaded filename (strip double extensions like .csv.gz)
+    base_name = os.path.basename(filename or "New_Store")
+    base_name = re.sub(r"\.(csv|xlsx|xls|json|jsonl|parquet|tsv|txt|xml|zip|gz)+$", "", base_name, flags=re.IGNORECASE)
     clean_name = re.sub(r"[_\-]+", " ", base_name).strip().title()
     if not clean_name:
       clean_name = "Uploaded Retail Store"
@@ -65,10 +67,10 @@ def detect_store_from_csv(first_chunk: pd.DataFrame, filename: str):
   return tenant_id, clean_name, api_key
 
 
-# Automatically maps any uploaded CSV column names to our 5 standard model columns
+# Automatically maps any uploaded column names to our 5 standard model columns
 def auto_map_columns(df: pd.DataFrame):
   detected_mapping = {}
-  lower_to_orig = {col.strip().lower(): col for col in df.columns}
+  lower_to_orig = {str(col).strip().lower(): col for col in df.columns}
 
   # Match each required column against exact or partial column name synonyms
   for target_col, synonyms in COLUMN_SYNONYMS.items():
@@ -113,7 +115,64 @@ def auto_map_columns(df: pd.DataFrame):
   return df, detected_mapping
 
 
-# Streams a large CSV file, auto-creates a dedicated store tenant, and bulk-loads 100k-row chunks
+# Detects the uploaded file extension (CSV, Excel, JSON, Parquet, TSV, XML, ZIP, GZ) and yields 100k-row DataFrames
+def iterate_any_file_in_chunks(file_obj, filename: str):
+  fname = (filename or "data.csv").lower()
+
+  # 1. If a .zip archive is uploaded, automatically open the first data file inside the ZIP!
+  if fname.endswith(".zip"):
+    z = zipfile.ZipFile(file_obj)
+    inner_files = [f for f in z.namelist() if not f.startswith("__MACOSX") and not f.endswith("/")]
+    if not inner_files:
+      raise ValueError("Uploaded ZIP archive is empty!")
+    inner_name = inner_files[0]
+    with z.open(inner_name) as inner_fp:
+      yield from iterate_any_file_in_chunks(inner_fp, inner_name)
+    return
+
+  # 2. Excel Workbooks (.xlsx, .xls) — e.g. UCI Online Retail II official file
+  if fname.endswith(".xlsx") or fname.endswith(".xls"):
+    df = pd.read_excel(file_obj)
+    for start in range(0, len(df), 100000):
+      yield df.iloc[start : start + 100000].copy()
+
+  # 3. Apache Parquet (.parquet) — Hadoop / Spark native columnar format
+  elif fname.endswith(".parquet"):
+    df = pd.read_parquet(file_obj)
+    for start in range(0, len(df), 100000):
+      yield df.iloc[start : start + 100000].copy()
+
+  # 4. JSON or JSON Lines (.json, .jsonl) — Shopify / WooCommerce / MongoDB exports
+  elif fname.endswith(".json") or fname.endswith(".jsonl"):
+    try:
+      df = pd.read_json(file_obj, lines=fname.endswith(".jsonl"))
+    except ValueError:
+      file_obj.seek(0)
+      df = pd.read_json(file_obj, lines=True)
+    for start in range(0, len(df), 100000):
+      yield df.iloc[start : start + 100000].copy()
+
+  # 5. XML (.xml) — Tally ERP / Accounting exports
+  elif fname.endswith(".xml"):
+    df = pd.read_xml(file_obj)
+    for start in range(0, len(df), 100000):
+      yield df.iloc[start : start + 100000].copy()
+
+  # 6. Tab-Separated (.tsv, .txt) — Amazon Seller Central reports
+  elif fname.endswith(".tsv") or fname.endswith(".txt"):
+    yield from pd.read_csv(
+        file_obj, sep="\t", chunksize=100000, encoding="utf-8", encoding_errors="replace", low_memory=False, on_bad_lines="skip"
+    )
+
+  # 7. Compressed GZIP CSV (.csv.gz, .gz) or Standard CSV (.csv)
+  else:
+    comp = "gzip" if fname.endswith(".gz") else "infer"
+    yield from pd.read_csv(
+        file_obj, compression=comp, chunksize=100000, encoding="utf-8", encoding_errors="replace", low_memory=False, on_bad_lines="skip"
+    )
+
+
+# Streams any supported file format, auto-creates a dedicated store tenant, and bulk-loads 100k-row chunks
 def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = None):
   raw_row_count = 0
   clean_row_count = 0
@@ -127,31 +186,21 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
   conn.execute("PRAGMA journal_mode=WAL;")
   conn.execute("PRAGMA synchronous=NORMAL;")
 
-  # Read CSV stream in 100,000-row batches to handle 260MB+ files smoothly
-  chunk_iterator = pd.read_csv(
-      file_obj,
-      chunksize=100000,
-      encoding="utf-8",
-      encoding_errors="replace",
-      low_memory=False,
-      on_bad_lines="skip",
-  )
-
-  for chunk in chunk_iterator:
-    chunk.columns = chunk.columns.str.strip()
+  # Iterate over 100k-row chunks from CSV, Excel, JSON, Parquet, TSV, XML, or ZIP
+  for chunk in iterate_any_file_in_chunks(file_obj, filename or "sales.csv"):
+    chunk.columns = [str(c).strip() for c in chunk.columns]
     raw_row_count += len(chunk)
 
-    # On the very first chunk, auto-detect the Store Name from the CSV data/filename if uploaded via UI
+    # On the very first chunk, auto-detect the Store Name from the data/filename if uploaded via UI
     if first_chunk_sample is None and filename:
       tenant_id, store_name, api_key = detect_store_from_csv(chunk, filename)
       conn.execute(
           "INSERT OR REPLACE INTO stores (tenant_id, store_name, api_key) VALUES (?, ?, ?)",
           (tenant_id, store_name, api_key),
       )
-      # Clear previous rows for this auto-detected store so re-uploading doesn't duplicate rows
       conn.execute("DELETE FROM sales WHERE tenant_id = ?", (tenant_id,))
 
-    # Map arbitrary CSV headers to CustomerID, InvoiceNo, InvoiceDate, Quantity, UnitPrice
+    # Map arbitrary headers to CustomerID, InvoiceNo, InvoiceDate, Quantity, UnitPrice
     mapped_chunk, schema_mapping = auto_map_columns(chunk)
 
     # Convert Quantity and UnitPrice to numeric values cleanly
@@ -201,10 +250,10 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
   if first_chunk_sample is not None:
     first_chunk_sample.to_parquet(parquet_file, index=False)
 
-  # Return summary statistics including the newly created store name and api_key
+  # Return summary statistics including file format and newly created store details
   return {
-      "status": "Chunked Big-Data ETL Completed",
-      "engine": "PySpark-Compatible Chunked Streaming Engine (100k rows/batch)",
+      "status": f"Multi-Format Big-Data ETL Completed ({os.path.splitext(filename or '.csv')[1].upper()} Format)",
+      "engine": "PySpark-Compatible Multi-Format Streaming Engine",
       "tenant_id": tenant_id,
       "store_name": store_name or tenant_id,
       "api_key": api_key,
