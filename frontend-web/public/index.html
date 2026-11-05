@@ -32,10 +32,10 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-3 mt-3 sm:mt-0">
-      <!-- File Upload Trigger: Streams any size CSV directly to the backend ETL engine -->
-      <label class="cursor-pointer px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition">
-        📤 Upload Any Sales CSV (1M+ Rows)
-        <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="uploadUniversalCsv(event)" />
+      <!-- Multi-Format File Upload Trigger: Accepts CSV, Excel, Parquet, JSON, TSV, XML, ZIP, and GZ -->
+      <label class="cursor-pointer px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition" title="Supports .csv, .xlsx, .xls, .parquet, .json, .jsonl, .tsv, .xml, .zip, .gz">
+        📤 Upload Dataset (CSV / Excel / Parquet / JSON / ZIP)
+        <input type="file" id="csvFileInput" accept=".csv,.xlsx,.xls,.parquet,.json,.jsonl,.tsv,.txt,.xml,.zip,.gz" class="hidden" onchange="uploadUniversalCsv(event)" />
       </label>
 
       <!-- Multi-Tenant Store Switcher Dropdown -->
@@ -380,7 +380,7 @@
       const toast = document.getElementById("etlToast");
       const toastText = document.getElementById("etlToastText");
       const progressBar = document.getElementById("etlProgressBar");
-      const sizeMB = (file.size / (2048 * 2048)).toFixed(1);
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
 
       toast.classList.remove("hidden");
       progressBar.style.width = "5%";
