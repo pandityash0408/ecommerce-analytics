@@ -1,8 +1,9 @@
 import os
 import sqlite3
 
-# Define the path to the persistent SQLite database file inside the backend folder
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Store the database inside the fast native Linux volume (/app/data) if set, else local folder
+BASE_DIR = os.getenv("DB_DIR", os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(BASE_DIR, exist_ok=True)
 DB_PATH = os.path.join(BASE_DIR, "ecommerce.db")
 
 
