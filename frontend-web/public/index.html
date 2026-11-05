@@ -1,345 +1,475 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
-  <!-- Set character encoding and responsive viewport for all screen sizes -->
+  <!-- Configure character set and responsive viewport -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PulseIQ — E-Commerce Customer Behavior Intelligence</title>
+  <title>Customer Behavior & Product Analytics</title>
 
-  <!-- Load Tailwind CSS for dark-mode styling and Chart.js for interactive charts -->
+  <!-- Load Tailwind CSS and Chart.js for clean enterprise layout and charting -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Define custom glassmorphism card styles and gradient text effects -->
+  <!-- Minimal enterprise stylesheet: crisp white panels, neutral slate borders, high density -->
   <style>
-    body { font-family: 'Inter', sans-serif; background-color: #090d16; color: #f8fafc; }
-    .glass { background: rgba(15, 23, 42, 0.78); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-    .glass-hover:hover { border-color: rgba(99, 102, 241, 0.5); transform: translateY(-2px); transition: all 0.2s ease; }
-    .gradient-text { background: linear-gradient(90deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #f8fafc; color: #0f172a; }
+    .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; }
+    .sidebar-transition { transition: width 0.2s ease, margin 0.2s ease; }
   </style>
 </head>
 <body class="min-h-screen flex flex-col">
 
-  <!-- TOP NAVIGATION BAR: Brand Logo, CSV Upload Button, Store Switcher, and Active Tenant Badge -->
-  <header class="glass sticky top-0 z-50 px-6 py-4 flex flex-wrap justify-between items-center border-b border-slate-800">
+  <!-- TOP ENTERPRISE HEADER BAR: Sidebar Toggle, App Title, Active Dataset Filename, and Upload Button -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-2.5 flex justify-between items-center">
     <div class="flex items-center space-x-3">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-extrabold text-xl shadow-lg shadow-indigo-500/30">P</div>
-      <div>
-        <h1 class="text-xl font-extrabold tracking-tight">Pulse<span class="gradient-text">IQ</span> Retailer Intelligence</h1>
-        <p class="text-xs text-slate-400">Express.js Gateway • FastAPI ML • PySpark Universal ETL • K-Means</p>
-      </div>
+      <!-- Button to open and close the Left Datasets Sidebar -->
+      <button onclick="toggleSidebar()" class="p-1.5 rounded border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium" title="Toggle Datasets Sidebar">
+        &#9776; Datasets
+      </button>
+      <div class="h-4 w-px bg-slate-200"></div>
+      <h1 class="text-sm font-bold text-slate-900 tracking-tight">E-Commerce Customer Behavior Analytics</h1>
     </div>
 
-    <div class="flex flex-wrap items-center gap-3 mt-3 sm:mt-0">
-      <!-- Multi-Format File Upload Trigger: Accepts CSV, Excel, Parquet, JSON, TSV, XML, ZIP, and GZ -->
-      <label class="cursor-pointer px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition" title="Supports .csv, .xlsx, .xls, .parquet, .json, .jsonl, .tsv, .xml, .zip, .gz">
-        📤 Upload Dataset (CSV / Excel / Parquet / JSON / ZIP)
+    <div class="flex items-center space-x-4">
+      <!-- Displays ONLY the clean name of the currently active dataset file -->
+      <span id="activeFileName" class="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded">
+        Loading dataset...
+      </span>
+
+      <!-- Multi-format dataset upload button -->
+      <label class="cursor-pointer px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-xs font-medium text-white transition">
+        Upload File
         <input type="file" id="csvFileInput" accept=".csv,.xlsx,.xls,.parquet,.json,.jsonl,.tsv,.txt,.xml,.zip,.gz" class="hidden" onchange="uploadUniversalCsv(event)" />
       </label>
-
-      <!-- Multi-Tenant Store Switcher Dropdown -->
-      <div class="flex items-center space-x-2 bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2">
-        <span class="text-xs text-slate-400 font-medium">🏪 Store:</span>
-        <select id="storeSelector" onchange="loadStoreData()" class="bg-transparent text-sm font-semibold text-indigo-400 focus:outline-none cursor-pointer">
-          <option value="key-store-a-123" class="bg-slate-900 text-white">Toy Kingdom (store_a)</option>
-          <option value="key-store-b-456" class="bg-slate-900 text-white">Sneaker World (store_b)</option>
-        </select>
-      </div>
-
-      <!-- Live Store Connection Status Badge -->
-      <span id="tenantBadge" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-        ⏳ Connecting to Store...
-      </span>
     </div>
   </header>
 
-  <!-- LIVE ETL PROGRESS & STATUS BANNER (Hidden until a CSV file is uploaded) -->
-  <div id="etlToast" class="hidden max-w-7xl w-full mx-auto px-6 pt-4">
-    <div class="p-4 rounded-2xl bg-slate-900/95 border border-indigo-500/40 text-xs text-slate-200 space-y-2">
-      <div class="flex justify-between items-center">
-        <div id="etlToastText" class="font-medium"></div>
-        <button onclick="document.getElementById('etlToast').classList.add('hidden')" class="text-slate-400 hover:text-white font-bold ml-4">✕</button>
-      </div>
-      <!-- Visual Progress Bar for 260MB+ CSV Uploads -->
-      <div id="etlProgressWrapper" class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-        <div id="etlProgressBar" class="bg-gradient-to-r from-indigo-500 to-emerald-400 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+  <!-- UPLOAD PROGRESS BAR (Visible only while uploading a file) -->
+  <div id="etlToast" class="hidden bg-slate-50 border-b border-slate-200 px-4 py-2">
+    <div class="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-700">
+      <div id="etlToastText" class="font-medium"></div>
+      <div class="flex items-center space-x-3">
+        <div class="w-48 bg-slate-200 h-1.5 rounded overflow-hidden">
+          <div id="etlProgressBar" class="bg-slate-800 h-1.5 transition-all duration-200" style="width: 0%"></div>
+        </div>
+        <button onclick="document.getElementById('etlToast').classList.add('hidden')" class="text-slate-400 hover:text-slate-700 font-bold">✕</button>
       </div>
     </div>
   </div>
 
-  <!-- MAIN DASHBOARD BODY -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
+  <!-- MAIN WORKSPACE: Collapsible Left Sidebar + High-Density Enterprise Content Area -->
+  <div class="flex-1 flex overflow-hidden">
 
-    <!-- SECTION 1: 5 EXECUTIVE STORE KPI CARDS -->
-    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-indigo-500">
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Revenue</p>
-        <h2 id="kpiRevenue" class="text-2xl font-extrabold mt-2 text-white">₹0</h2>
-        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">▲ +18.4% growth</span>
+    <!-- COLLAPSIBLE LEFT SIDEBAR: Lists all uploaded datasets saved in the database -->
+    <aside id="datasetSidebar" class="w-60 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col sidebar-transition">
+      <div class="px-3.5 py-2.5 border-b border-slate-200 flex justify-between items-center">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Uploaded Files</span>
+        <span id="datasetCount" class="text-xs text-slate-400 font-medium">0</span>
       </div>
-      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-sky-500">
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Customers</p>
-        <h2 id="kpiCustomers" class="text-2xl font-extrabold mt-2 text-white">0</h2>
-        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-sky-500/10 text-sky-400">Multi-Tenant Isolated</span>
+      <div id="sidebarFileList" class="flex-1 overflow-y-auto divide-y divide-slate-100 p-1.5 space-y-0.5">
+        <!-- Dynamically populated with uploaded dataset filenames -->
       </div>
-      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-purple-500">
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Avg Customer Spend</p>
-        <h2 id="kpiAvgSpend" class="text-2xl font-extrabold mt-2 text-white">₹0</h2>
-        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-purple-500/10 text-purple-400">Per Verified Buyer</span>
-      </div>
-      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-emerald-500">
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">VIP Champions (Top 200)</p>
-        <h2 id="kpiVips" class="text-2xl font-extrabold mt-2 text-white">0</h2>
-        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400">High CLV Segment</span>
-      </div>
-      <div class="glass glass-hover rounded-2xl p-5 border-l-4 border-l-rose-500">
-        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">At-Risk (Churn Alert)</p>
-        <h2 id="kpiAtRisk" class="text-2xl font-extrabold mt-2 text-white">0</h2>
-        <span class="inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded bg-rose-500/10 text-rose-400">Action Required</span>
-      </div>
-    </section>
+    </aside>
 
-    <!-- SECTION 2: AUTOMATED AI STORE REVIEWS & TOP 15 CUSTOMER CLV CHART -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div class="glass rounded-2xl p-6 space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-bold text-white">🧠 AI Store Advisor Reviews</h3>
-          <span class="text-xs px-2.5 py-1 rounded-md bg-indigo-500/20 text-indigo-300 font-semibold">Auto-Generated</span>
+    <!-- MAIN CONTENT AREA -->
+    <main class="flex-1 overflow-y-auto p-5 space-y-5 max-w-[1600px] mx-auto">
+
+      <!-- ROW 1: 5 HIGH-DENSITY KPI CARDS (Including Best Customer & Worst Customer) -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div class="panel p-3.5">
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Revenue</p>
+          <p id="kpiRevenue" class="text-xl font-bold text-slate-900 mt-1">₹0</p>
+          <p class="text-[11px] text-slate-400 mt-0.5">Cumulative dataset sales</p>
         </div>
-        <div id="reviewsList" class="space-y-3 text-sm text-slate-300 leading-relaxed"></div>
-      </div>
 
-      <div class="glass rounded-2xl p-6 lg:col-span-2">
-        <h3 class="text-lg font-bold text-white mb-4">📈 Top Customers: Current Spend vs. Predicted 6-Month CLV (₹)</h3>
-        <div class="h-64">
-          <canvas id="clvChart"></canvas>
+        <div class="panel p-3.5">
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Customers</p>
+          <p id="kpiCustomers" class="text-xl font-bold text-slate-900 mt-1">0</p>
+          <p class="text-[11px] text-slate-400 mt-0.5">Distinct buyer accounts</p>
         </div>
-      </div>
-    </section>
 
-    <!-- SECTION 3: INTERACTIVE CUSTOMER BEHAVIOR TABLE & CUSTOMER 360 INSPECTOR -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div class="glass rounded-2xl p-6 lg:col-span-2 overflow-x-auto">
-        <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
+        <div class="panel p-3.5">
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Avg Spend / Customer</p>
+          <p id="kpiAvgSpend" class="text-xl font-bold text-slate-900 mt-1">₹0</p>
+          <p class="text-[11px] text-slate-400 mt-0.5">Mean customer value</p>
+        </div>
+
+        <!-- KPI 4: BEST CUSTOMER (Most money spent & most products dealt with) -->
+        <div class="panel p-3.5 border-l-2 border-l-slate-800">
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Best Customer</p>
+          <p id="kpiBestId" class="text-base font-bold text-slate-900 mt-1 truncate">—</p>
+          <p id="kpiBestMeta" class="text-[11px] text-slate-600 mt-0.5">₹0 • 0 products</p>
+        </div>
+
+        <!-- KPI 5: WORST CUSTOMER (Least money spent & fewest products dealt with) -->
+        <div class="panel p-3.5 border-l-2 border-l-slate-300">
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Worst Customer</p>
+          <p id="kpiWorstId" class="text-base font-bold text-slate-900 mt-1 truncate">—</p>
+          <p id="kpiWorstMeta" class="text-[11px] text-slate-500 mt-0.5">₹0 • 0 products</p>
+        </div>
+      </section>
+
+      <!-- ROW 2: EXECUTIVE SUMMARY NOTES & MULTI-PRODUCT YEAR/MONTH TREND ANALYSIS -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- Left: Concise Analytical Findings -->
+        <div class="panel p-4 flex flex-col justify-between">
           <div>
-            <h3 class="text-lg font-bold text-white">👥 Customer Behavior Segments & Action Plan</h3>
-            <p class="text-xs text-slate-400">Showing Top 100 Customers • Click any row to inspect their 360° profile</p>
-          </div>
-          <!-- Live Search Input to filter customers by ID or Segment -->
-          <input
-            type="text"
-            id="customerSearch"
-            oninput="filterCustomerTable()"
-            placeholder="🔍 Search customer or segment..."
-            class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-          />
-        </div>
-
-        <div class="max-h-96 overflow-y-auto">
-          <table class="w-full text-left border-collapse text-sm">
-            <thead class="sticky top-0 bg-slate-900/95">
-              <tr class="border-b border-slate-800 text-slate-400 text-xs uppercase">
-                <th class="py-3 px-3">Customer</th>
-                <th class="py-3 px-3">Segment & ML Cluster</th>
-                <th class="py-3 px-3">Spent</th>
-                <th class="py-3 px-3">6M CLV</th>
-                <th class="py-3 px-3">Churn Risk</th>
-                <th class="py-3 px-3">Recommended Retailer Action</th>
-              </tr>
-            </thead>
-            <tbody id="customerTableBody" class="divide-y divide-slate-800/60"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Right Column: Customer 360 SHAP Inspector & WhatsApp Campaign Generator -->
-      <div class="glass rounded-2xl p-6 flex flex-col justify-between space-y-4 border border-indigo-500/30">
-        <div>
-          <span class="text-xs font-bold uppercase tracking-wider text-indigo-400">🔍 Customer 360° Deep Dive</span>
-          <h3 id="c360Name" class="text-xl font-extrabold text-white mt-1">Select a customer</h3>
-          <p id="c360Meta" class="text-xs text-slate-400 mt-1">Click any row in the table to inspect SHAP drivers</p>
-          <div class="mt-4 space-y-2" id="c360Shap"></div>
-        </div>
-
-        <div class="pt-4 border-t border-slate-800 space-y-2">
-          <label class="text-xs font-semibold text-emerald-400 uppercase">💬 Ready-to-Send WhatsApp / Email Offer:</label>
-          <textarea id="c360Message" rows="3" readonly class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 focus:outline-none"></textarea>
-          <div class="flex gap-2">
-            <button onclick="copyCampaign()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs transition">
-              📋 Copy Offer
-            </button>
-            <button onclick="eraseCustomerDpdp()" class="px-3 py-2.5 rounded-xl bg-rose-950 hover:bg-rose-900 border border-rose-500/30 text-rose-300 font-semibold text-xs transition" title="India DPDP Act 2023 Right to Erasure">
-              🗑️ DPDP Erase
-            </button>
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">Dataset Findings & Summary</h2>
+            <div id="reviewsList" class="mt-3 space-y-2.5 text-xs text-slate-700 leading-relaxed"></div>
           </div>
         </div>
-      </div>
-    </section>
 
-    <!-- SECTION 4: PRODUCT BUNDLE RECOMMENDATIONS & WHAT-IF REVENUE SIMULATOR -->
-    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="glass rounded-2xl p-6">
-        <h3 class="text-lg font-bold text-white mb-1">🛍️ Smart Product Bundle Recommendations</h3>
-        <p class="text-xs text-slate-400 mb-4">Frequently bought together rules to increase Average Order Value at checkout</p>
-        <div id="bundleCards" class="space-y-3"></div>
-      </div>
-
-      <div class="glass rounded-2xl p-6 space-y-5">
-        <div>
-          <h3 class="text-lg font-bold text-white">💰 Interactive 'What-If' Revenue Simulator</h3>
-          <p class="text-xs text-slate-400">Simulate 6-month store revenue uplift from retention & cross-sell bundles</p>
-        </div>
-        <div class="space-y-4">
-          <div>
-            <div class="flex justify-between text-xs font-semibold mb-1">
-              <span>Win-Back % of At-Risk Customers:</span>
-              <span id="winbackVal" class="text-indigo-400">40%</span>
-            </div>
-            <input id="winbackSlider" type="range" min="0" max="100" value="40" oninput="updateSimulator()" class="w-full accent-indigo-500 cursor-pointer" />
-          </div>
-          <div>
-            <div class="flex justify-between text-xs font-semibold mb-1">
-              <span>Product Bundle Order Size Uplift %:</span>
-              <span id="bundleVal" class="text-purple-400">15%</span>
-            </div>
-            <input id="bundleSlider" type="range" min="0" max="50" value="15" oninput="updateSimulator()" class="w-full accent-purple-500 cursor-pointer" />
-          </div>
-          <div class="p-4 rounded-xl bg-gradient-to-r from-indigo-950/80 to-purple-950/80 border border-indigo-500/30 flex justify-between items-center">
+        <!-- Right (2 Columns): Multi-Product Year-wise & Month-wise Sales Analysis -->
+        <div class="panel p-4 lg:col-span-2 space-y-3">
+          <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2.5">
             <div>
-              <p class="text-xs text-slate-300">Projected 6-Month Extra Revenue</p>
-              <p id="simNewTotal" class="text-xs text-indigo-300 mt-0.5">New Store Total: ₹0</p>
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Product Sales Analysis (Year-wise / Month-wise)</h2>
+              <p class="text-[11px] text-slate-500">Search and select one or multiple products to compare sales over time</p>
             </div>
-            <div id="simGain" class="text-2xl font-extrabold text-emerald-400">+₹0</div>
+
+            <!-- Granularity Selector: Month-wise vs Year-wise -->
+            <div class="flex items-center space-x-2">
+              <select id="trendGranularity" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none">
+                <option value="month">Month-wise (YYYY-MM)</option>
+                <option value="year">Year-wise (YYYY)</option>
+              </select>
+              <select id="trendMetric" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none">
+                <option value="revenue">Revenue (₹)</option>
+                <option value="units">Units Sold</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Product Search Bar & Selected Product Chips -->
+          <div class="space-y-2">
+            <div class="relative">
+              <input
+                type="text"
+                id="productSearchInput"
+                oninput="searchProductsDropdown()"
+                onfocus="searchProductsDropdown()"
+                placeholder="Search products in dataset to add to chart..."
+                class="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-slate-600"
+              />
+              <!-- Dropdown Results for Product Search -->
+              <div id="productSearchResults" class="hidden absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded shadow-sm max-h-44 overflow-y-auto z-30 divide-y divide-slate-100 text-xs"></div>
+            </div>
+
+            <!-- Active Selected Products Pills -->
+            <div id="selectedProductsChips" class="flex flex-wrap gap-1.5"></div>
+          </div>
+
+          <!-- Chart.js Canvas for Product Trends -->
+          <div class="h-60 pt-1">
+            <canvas id="productTrendChart"></canvas>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-  </main>
+      <!-- ROW 3: CUSTOMER BEHAVIOR SEGMENTATION TABLE & CUSTOMER 360 RECORD VIEW -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-  <!-- FRONTEND APPLICATION JAVASCRIPT -->
+        <!-- Customer Segmentation Table -->
+        <div class="panel p-4 lg:col-span-2 flex flex-col">
+          <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2.5 mb-3">
+            <div>
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Customer Segmentation & Behavior Ledger</h2>
+              <p class="text-[11px] text-slate-500">RFM + K-Means Clustering • Click any customer row to view order details</p>
+            </div>
+            <input
+              type="text"
+              id="customerSearch"
+              oninput="filterCustomerTable()"
+              placeholder="Filter customer ID or segment..."
+              class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:bg-white"
+            />
+          </div>
+
+          <div class="max-h-96 overflow-y-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead class="sticky top-0 bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[11px]">
+                <tr>
+                  <th class="py-2 px-2.5">Customer ID</th>
+                  <th class="py-2 px-2.5">Segment</th>
+                  <th class="py-2 px-2.5">Cluster</th>
+                  <th class="py-2 px-2.5">Orders</th>
+                  <th class="py-2 px-2.5">Units</th>
+                  <th class="py-2 px-2.5">Total Spend</th>
+                  <th class="py-2 px-2.5">Churn Risk</th>
+                  <th class="py-2 px-2.5">Recommended Action</th>
+                </tr>
+              </thead>
+              <tbody id="customerTableBody" class="divide-y divide-slate-200 text-slate-700"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Customer 360 Detail Panel -->
+        <div class="panel p-4 flex flex-col justify-between space-y-4">
+          <div>
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">Customer Account Inspector</h2>
+            <h3 id="c360Name" class="text-base font-bold text-slate-900 mt-3">Select a customer</h3>
+            <p id="c360Meta" class="text-xs text-slate-500 mt-0.5">Click a row in the table to inspect metrics</p>
+
+            <div class="mt-3 space-y-1.5" id="c360Shap"></div>
+          </div>
+
+          <div class="pt-3 border-t border-slate-200 space-y-2">
+            <label class="text-[11px] font-semibold text-slate-600 uppercase">Outreach Note</label>
+            <textarea id="c360Message" rows="3" readonly class="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs text-slate-700 focus:outline-none"></textarea>
+            <div class="flex gap-2">
+              <button onclick="copyCampaign()" class="flex-1 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs transition">
+                Copy Note
+              </button>
+              <button onclick="eraseCustomerDpdp()" class="px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium text-xs transition">
+                Delete Record
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <!-- APPLICATION LOGIC -->
   <script>
-    // Global state variables for revenue simulator, customer list, and Chart.js instance
-    let currentBaseRevenue = 0;
+    // Track active dataset key, customer list, selected products for chart, and Chart.js instance
+    let activeApiKey = localStorage.getItem("lastActiveDatasetKey") || "";
     let selectedCustomerId = "";
     let allCustomersCache = [];
-    let clvChartInstance = null;
+    let selectedProducts = [];
+    let productChartInstance = null;
 
-    // Fetches store insights from the backend and automatically retries if the container is still starting
-    async function loadStoreData(retryCount = 0) {
-      const apiKey = document.getElementById("storeSelector").value;
-      const badge = document.getElementById("tenantBadge");
+    // Opens or closes the left dataset list sidebar
+    function toggleSidebar() {
+      const sb = document.getElementById("datasetSidebar");
+      sb.classList.toggle("hidden");
+    }
 
+    // Hide the product search dropdown when clicking outside
+    document.addEventListener("click", (e) => {
+      const box = document.getElementById("productSearchResults");
+      const inp = document.getElementById("productSearchInput");
+      if (!box.contains(e.target) && e.target !== inp) {
+        box.classList.add("hidden");
+      }
+    });
+
+    // Loads all saved dataset files from SQLite and highlights the active dataset in the left sidebar
+    async function refreshDatasetSidebar(preferredKey = null) {
       try {
-        const res = await fetch("/api/insights", { headers: { "x-api-key": apiKey } });
-        if (!res.ok) throw new Error("Backend waking up");
+        const res = await fetch("/api/stores");
+        if (!res.ok) return;
+        const data = await res.json();
+        const stores = data.stores || [];
+        document.getElementById("datasetCount").innerText = stores.length;
+
+        if (preferredKey) {
+          activeApiKey = preferredKey;
+        } else if (!activeApiKey || !stores.some(s => s.api_key === activeApiKey)) {
+          // Default to the most recently uploaded dataset (index 0)
+          activeApiKey = stores.length > 0 ? stores[0].api_key : "key-sample-sales";
+        }
+        localStorage.setItem("lastActiveDatasetKey", activeApiKey);
+
+        const listEl = document.getElementById("sidebarFileList");
+        listEl.innerHTML = stores.map(s => {
+          const isActive = s.api_key === activeApiKey;
+          const activeClass = isActive
+            ? "bg-slate-900 text-white font-semibold"
+            : "text-slate-700 hover:bg-slate-100 font-normal";
+          return `
+            <button
+              onclick="switchDataset('${s.api_key}')"
+              class="w-full text-left px-2.5 py-2 rounded text-xs truncate transition ${activeClass}"
+              title="${s.store_name}"
+            >
+              ${s.store_name}
+            </button>
+          `;
+        }).join("");
+      } catch (e) {
+        // Retry handled by loadStoreData
+      }
+    }
+
+    // Switches the active dataset when the user clicks a file in the left sidebar
+    function switchDataset(apiKey) {
+      activeApiKey = apiKey;
+      localStorage.setItem("lastActiveDatasetKey", apiKey);
+      selectedProducts = [];
+      refreshDatasetSidebar(apiKey);
+      loadStoreData(0);
+    }
+
+    // Fetches KPIs, Best/Worst customers, and customer segments for the active dataset
+    async function loadStoreData(retryCount = 0) {
+      try {
+        if (!activeApiKey) await refreshDatasetSidebar();
+        const res = await fetch("/api/insights", { headers: { "x-api-key": activeApiKey } });
+        if (!res.ok) throw new Error("Backend starting");
         const data = await res.json();
 
-        // Update Top KPI Cards with formatted Indian Rupee numbers
-        currentBaseRevenue = data.kpis.total_revenue || 0;
-        document.getElementById("kpiRevenue").innerText = "₹" + currentBaseRevenue.toLocaleString("en-IN");
+        // Show ONLY the clean dataset filename in the top bar
+        document.getElementById("activeFileName").innerText = data.store_name;
+
+        // Populate top KPI cards including Best Customer and Worst Customer
+        document.getElementById("kpiRevenue").innerText = "₹" + (data.kpis.total_revenue || 0).toLocaleString("en-IN");
         document.getElementById("kpiCustomers").innerText = (data.kpis.total_customers || 0).toLocaleString("en-IN");
         document.getElementById("kpiAvgSpend").innerText = "₹" + (data.kpis.avg_spend || 0).toLocaleString("en-IN");
-        document.getElementById("kpiVips").innerText = data.kpis.vip_count || 0;
-        document.getElementById("kpiAtRisk").innerText = data.kpis.at_risk_count || 0;
 
-        // Update top-right badge to show the active Store Name and Tenant ID
-        badge.className = "px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
-        badge.innerText = `● ${data.store_name} (${data.tenant_id})`;
+        const best = data.kpis.best_customer || { id: "N/A", spend: 0, units: 0 };
+        document.getElementById("kpiBestId").innerText = best.id;
+        document.getElementById("kpiBestMeta").innerText = `₹${(best.spend || 0).toLocaleString("en-IN")} • ${(best.units || 0).toLocaleString("en-IN")} units`;
 
-        // Render plain-English AI Store Advisor review cards
+        const worst = data.kpis.worst_customer || { id: "N/A", spend: 0, units: 0 };
+        document.getElementById("kpiWorstId").innerText = worst.id;
+        document.getElementById("kpiWorstMeta").innerText = `₹${(worst.spend || 0).toLocaleString("en-IN")} • ${(worst.units || 0).toLocaleString("en-IN")} units`;
+
+        // Render clean executive summary notes
         document.getElementById("reviewsList").innerHTML = (data.store_reviews || []).map(r =>
-          `<div class="p-3 rounded-xl bg-slate-900/90 border border-slate-800">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-indigo-300">$1</strong>')}</div>`
+          `<div class="p-2.5 rounded bg-slate-50 border border-slate-200">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-slate-900">$1</strong>')}</div>`
         ).join("");
 
-        // Slice top 15 customers for Chart.js so the chart stays crisp even with 1M+ rows
+        // Render customer segmentation table
         allCustomersCache = data.customer_behavior || [];
-        const top15 = allCustomersCache.slice(0, 15);
-        const labels = top15.map(c => c.CustomerID);
-        const spendData = top15.map(c => c.Total_Spent);
-        const clvData = top15.map(c => c.Predicted_6M_CLV);
-
-        if (clvChartInstance) clvChartInstance.destroy();
-        const ctx = document.getElementById("clvChart").getContext("2d");
-        clvChartInstance = new Chart(ctx, {
-          type: "bar",
-          data: {
-            labels,
-            datasets: [
-              { label: "Current Spend (₹)", data: spendData, backgroundColor: "#6366f1", borderRadius: 6 },
-              { label: "Predicted 6M CLV (₹)", data: clvData, backgroundColor: "#06b6d4", borderRadius: 6 }
-            ]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: "#cbd5e1" } } },
-            scales: {
-              x: { ticks: { color: "#94a3b8" }, grid: { display: false } },
-              y: { ticks: { color: "#94a3b8" }, grid: { color: "rgba(148,163,184,0.1)" } }
-            }
-          }
-        });
-
-        // Render the customer table and product bundles
         renderCustomerRows(allCustomersCache);
 
-        document.getElementById("bundleCards").innerHTML = (data.product_recommendations || []).map(b => `
-          <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex justify-between items-center">
-            <div>
-              <p class="text-sm font-bold text-white">If buying: <span class="text-indigo-400">${b.If_Customer_Buys}</span></p>
-              <p class="text-xs text-emerald-400 font-semibold mt-0.5">➔ Recommend: ${b.Also_Recommend}</p>
-              <p class="text-xs text-slate-400 mt-1">${b.Why_It_Works}</p>
-            </div>
-            <span class="px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 font-bold text-xs">${b.Confidence} Match</span>
-          </div>
-        `).join("");
-
-        updateSimulator();
         if (allCustomersCache.length > 0) {
           inspectCustomer(allCustomersCache[0].CustomerID);
         }
+
+        // Load the Year-wise / Month-wise Product Sales Trend Chart
+        loadProductTrends();
       } catch (err) {
-        // Retry up to 10 times (1.5s apart) if the FastAPI container is still booting up
         if (retryCount < 10) {
-          badge.innerText = `⏳ Waking up AI Engine (${retryCount + 1}/10)...`;
+          document.getElementById("activeFileName").innerText = `Loading engine (${retryCount + 1}/10)...`;
           setTimeout(() => loadStoreData(retryCount + 1), 1500);
-        } else {
-          badge.className = "px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20";
-          badge.innerText = "🚨 Backend Offline (Run .\\start.bat)";
         }
       }
     }
 
-    // Renders customer rows into the HTML table with color-coded churn risk progress bars
-    function renderCustomerRows(customers) {
-      document.getElementById("customerTableBody").innerHTML = customers.map(c => {
-        const riskColor = c["Churn_Risk_%"] > 50 ? "bg-rose-500" : c["Churn_Risk_%"] > 15 ? "bg-amber-500" : "bg-emerald-500";
-        return `
-          <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-800/50 cursor-pointer transition">
-            <td class="py-3 px-3 font-bold text-white">${c.CustomerID}</td>
-            <td class="py-3 px-3">
-              <span class="font-medium text-slate-200">${c.Segment}</span>
-              <span class="block text-xs text-indigo-400">${c.KMeans_ML_Cluster || 'Cluster 0'}</span>
-            </td>
-            <td class="py-3 px-3 font-semibold text-slate-200">₹${c.Total_Spent.toLocaleString("en-IN")}</td>
-            <td class="py-3 px-3 font-semibold text-cyan-400">₹${c.Predicted_6M_CLV.toLocaleString("en-IN")}</td>
-            <td class="py-3 px-3 w-36">
-              <div class="flex items-center space-x-2">
-                <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div class="${riskColor} h-2 rounded-full" style="width: ${c['Churn_Risk_%']}%"></div>
-                </div>
-                <span class="text-xs font-bold">${c["Churn_Risk_%"]}%</span>
-              </div>
-            </td>
-            <td class="py-3 px-3 text-xs text-slate-300">${c.Recommended_Retailer_Action}</td>
-          </tr>
-        `;
-      }).join("");
+    // Searches products in the active dataset and displays a dropdown to add products to the chart
+    async function searchProductsDropdown() {
+      const q = document.getElementById("productSearchInput").value;
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`, {
+        headers: { "x-api-key": activeApiKey }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const box = document.getElementById("productSearchResults");
+      const list = data.products || [];
+
+      if (list.length === 0) {
+        box.innerHTML = `<div class="p-2 text-slate-400">No matching products found</div>`;
+      } else {
+        box.innerHTML = list.map(p => {
+          const safeName = String(p.Product).replace(/'/g, "\\'");
+          return `
+            <div onclick="addProductToChart('${safeName}')" class="p-2 hover:bg-slate-100 cursor-pointer flex justify-between items-center">
+              <span class="font-medium text-slate-800 truncate">${p.Product}</span>
+              <span class="text-slate-500 ml-2">₹${(p.TotalRevenue || 0).toLocaleString("en-IN")} (${p.TotalUnits} units)</span>
+            </div>
+          `;
+        }).join("");
+      }
+      box.classList.remove("hidden");
     }
 
-    // Filters the displayed customer table rows based on the search box input
+    // Adds a product to the multi-product comparison list and refreshes the trend chart
+    function addProductToChart(productName) {
+      if (!selectedProducts.includes(productName)) {
+        selectedProducts.push(productName);
+      }
+      document.getElementById("productSearchResults").classList.add("hidden");
+      document.getElementById("productSearchInput").value = "";
+      loadProductTrends();
+    }
+
+    // Removes a product chip from the multi-product trend chart
+    function removeProductFromChart(productName) {
+      selectedProducts = selectedProducts.filter(p => p !== productName);
+      loadProductTrends();
+    }
+
+    // Fetches and renders Year-wise or Month-wise sales trends for the selected product(s)
+    async function loadProductTrends() {
+      const granularity = document.getElementById("trendGranularity").value;
+      const metric = document.getElementById("trendMetric").value;
+
+      const params = new URLSearchParams({ granularity });
+      selectedProducts.forEach(p => params.append("products", p));
+
+      const res = await fetch(`/api/products/trends?${params.toString()}`, {
+        headers: { "x-api-key": activeApiKey }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // Sync selectedProducts with defaults if empty on initial load
+      selectedProducts = data.selected_products || [];
+      document.getElementById("selectedProductsChips").innerHTML = selectedProducts.map(p => {
+        const safeName = String(p).replace(/'/g, "\\'");
+        return `
+          <span class="inline-flex items-center bg-slate-100 border border-slate-300 text-slate-800 text-[11px] font-medium px-2 py-0.5 rounded">
+            ${p}
+            <button onclick="removeProductFromChart('${safeName}')" class="ml-1.5 text-slate-500 hover:text-slate-900 font-bold">×</button>
+          </span>
+        `;
+      }).join("");
+
+      // Neutral enterprise color palette for multi-product chart series
+      const palette = ["#0f172a", "#2563eb", "#0d9488", "#d97706", "#dc2626", "#4f46e5"];
+      const datasets = (data.series || []).map((s, idx) => ({
+        label: s.product,
+        data: metric === "units" ? s.units : s.revenue,
+        borderColor: palette[idx % palette.length],
+        backgroundColor: palette[idx % palette.length],
+        borderWidth: 2,
+        tension: 0.2,
+        borderRadius: 3
+      }));
+
+      if (productChartInstance) productChartInstance.destroy();
+      const ctx = document.getElementById("productTrendChart").getContext("2d");
+      productChartInstance = new Chart(ctx, {
+        type: data.periods && data.periods.length > 1 ? "line" : "bar",
+        data: { labels: data.periods || [], datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "top", labels: { color: "#334155", boxWidth: 12, font: { size: 11 } } }
+          },
+          scales: {
+            x: { ticks: { color: "#64748b", font: { size: 11 } }, grid: { color: "#f1f5f9" } },
+            y: { ticks: { color: "#64748b", font: { size: 11 } }, grid: { color: "#e2e8f0" } }
+          }
+        }
+      });
+    }
+
+    // Renders high-density customer rows into the segmentation table
+    function renderCustomerRows(customers) {
+      document.getElementById("customerTableBody").innerHTML = customers.map(c => `
+        <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-50 cursor-pointer">
+          <td class="py-2 px-2.5 font-semibold text-slate-900">${c.CustomerID}</td>
+          <td class="py-2 px-2.5">${c.Segment}</td>
+          <td class="py-2 px-2.5 text-slate-500">${c.KMeans_ML_Cluster || 'Cluster 0'}</td>
+          <td class="py-2 px-2.5">${c.Orders}</td>
+          <td class="py-2 px-2.5">${(c.Total_Products || c.Orders).toLocaleString("en-IN")}</td>
+          <td class="py-2 px-2.5 font-medium text-slate-900">₹${c.Total_Spent.toLocaleString("en-IN")}</td>
+          <td class="py-2 px-2.5">${c["Churn_Risk_%"]}%</td>
+          <td class="py-2 px-2.5 text-slate-600">${c.Recommended_Retailer_Action}</td>
+        </tr>
+      `).join("");
+    }
+
+    // Filters customer table rows by customer ID or segment name
     function filterCustomerTable() {
       const q = document.getElementById("customerSearch").value.toLowerCase();
       const filtered = allCustomersCache.filter(c =>
@@ -349,34 +479,32 @@
       renderCustomerRows(filtered);
     }
 
-    // Loads a single customer's 360° order history, SHAP drivers, and WhatsApp offer
+    // Loads individual customer metrics and order ledger into the right-hand inspector panel
     async function inspectCustomer(customerId) {
       selectedCustomerId = customerId;
-      const apiKey = document.getElementById("storeSelector").value;
       const res = await fetch(`/api/customer-360/${encodeURIComponent(customerId)}`, {
-        headers: { "x-api-key": apiKey }
+        headers: { "x-api-key": activeApiKey }
       });
       if (!res.ok) return;
       const c360 = await res.json();
 
-      document.getElementById("c360Name").innerText = `${c360.customer_id} — ₹${c360.total_spent.toLocaleString("en-IN")}`;
-      document.getElementById("c360Meta").innerText = `${c360.orders_count} Orders • Last Purchase: ${c360.last_order_date}`;
+      document.getElementById("c360Name").innerText = `${c360.customer_id} (₹${c360.total_spent.toLocaleString("en-IN")})`;
+      document.getElementById("c360Meta").innerText = `${c360.orders_count} Orders • Last Order: ${c360.last_order_date}`;
       document.getElementById("c360Message").value = c360.ready_to_send_message;
 
       document.getElementById("c360Shap").innerHTML = c360.shap_explanations.map(s => `
-        <div class="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between text-xs">
-          <span class="text-slate-400">${s.Feature}:</span>
-          <span class="font-semibold text-indigo-300">${s.Impact}</span>
+        <div class="p-2 rounded bg-slate-50 border border-slate-200 flex justify-between text-xs">
+          <span class="text-slate-500">${s.Feature}</span>
+          <span class="font-semibold text-slate-800">${s.Impact}</span>
         </div>
       `).join("");
     }
 
-    // Streams large CSV files (260MB+ / 1M+ rows) with a live upload percentage bar
+    // Streams any uploaded dataset file to the backend ETL and adds it to the left sidebar
     function uploadUniversalCsv(event) {
       const file = event.target.files[0];
       if (!file) return;
 
-      const apiKey = document.getElementById("storeSelector").value;
       const toast = document.getElementById("etlToast");
       const toastText = document.getElementById("etlToastText");
       const progressBar = document.getElementById("etlProgressBar");
@@ -384,22 +512,21 @@
 
       toast.classList.remove("hidden");
       progressBar.style.width = "5%";
-      toastText.innerHTML = `⏳ Uploading <strong>${file.name} (${sizeMB} MB)</strong> to Chunked Spark ETL Engine...`;
+      toastText.innerText = `Uploading ${file.name} (${sizeMB} MB)...`;
 
       const formData = new FormData();
       formData.append("file", file);
 
-     // Automatically route to Kubernetes NodePort 30800 if opened on K8s port 30300, else Docker port 8000
       const backendPort = window.location.port === "30300" ? "30800" : "8000";
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${window.location.protocol}//${window.location.hostname}:${backendPort}/etl/upload`, true);
-      xhr.setRequestHeader("X-API-Key", apiKey);
+      xhr.setRequestHeader("X-API-Key", activeApiKey || "key-sample-sales");
 
       xhr.upload.onprogress = function (e) {
         if (e.lengthComputable) {
           const pct = Math.round((e.loaded / e.total) * 85);
           progressBar.style.width = pct + "%";
-          toastText.innerHTML = `⏳ Streaming <strong>${file.name} (${sizeMB} MB)</strong>: ${pct}% uploaded... Cleaning & indexing chunks in SQLite WAL...`;
+          toastText.innerText = `Uploading ${file.name} (${sizeMB} MB): ${pct}% — Indexing dataset...`;
         }
       };
 
@@ -407,75 +534,37 @@
         if (xhr.status === 200) {
           const data = JSON.parse(xhr.responseText);
           progressBar.style.width = "100%";
-          toastText.innerHTML = `✅ Created Store <strong>${data.store_name}</strong> (<code>${data.tenant_id}</code>): Processed <strong>${data.extract_raw_rows.toLocaleString()} raw rows</strong> ➔ Saved <strong>${data.load_clean_rows_saved.toLocaleString()} clean rows</strong>!`;
-          // Add the new store to the navbar dropdown and switch to it immediately!
-          refreshStoresDropdown(data.api_key).then(() => loadStoreData());
+          toastText.innerText = `Saved ${data.store_name} (${data.load_clean_rows_saved.toLocaleString()} clean rows).`;
+          selectedProducts = [];
+          refreshDatasetSidebar(data.api_key).then(() => loadStoreData(0));
         } else {
-          toastText.innerHTML = `🚨 ETL Error (${xhr.status}): ${xhr.responseText}`;
+          toastText.innerText = `Upload failed (${xhr.status}): ${xhr.responseText}`;
         }
-      };
-
-      xhr.onerror = function () {
-        toastText.innerHTML = `🚨 Upload connection failed. Make sure ecommerce-backend container is running on port 8000!`;
       };
 
       xhr.send(formData);
     }
 
-    // Deletes a customer's records to comply with India DPDP Act 2023 Right to Erasure
+    // Deletes a customer record under DPDP compliance
     async function eraseCustomerDpdp() {
       if (!selectedCustomerId) return;
-      if (!confirm(`Execute India DPDP Act 2023 Right to Erasure for customer "${selectedCustomerId}"?`)) return;
-      const apiKey = document.getElementById("storeSelector").value;
+      if (!confirm(`Delete all records for customer "${selectedCustomerId}"?`)) return;
       await fetch(`/api/privacy/erase/${encodeURIComponent(selectedCustomerId)}`, {
         method: "DELETE",
-        headers: { "x-api-key": apiKey }
+        headers: { "x-api-key": activeApiKey }
       });
-      loadStoreData();
+      loadStoreData(0);
     }
 
-    // Calculates projected 6-month revenue gain when the user moves the What-If sliders
-    function updateSimulator() {
-      const winback = parseInt(document.getElementById("winbackSlider").value);
-      const bundle = parseInt(document.getElementById("bundleSlider").value);
-      document.getElementById("winbackVal").innerText = winback + "%";
-      document.getElementById("bundleVal").innerText = bundle + "%";
-
-      const gain = Math.round(currentBaseRevenue * (winback / 100 * 0.25) + currentBaseRevenue * (bundle / 100));
-      document.getElementById("simGain").innerText = "+₹" + gain.toLocaleString("en-IN");
-      document.getElementById("simNewTotal").innerText = "New Store Total: ₹" + (currentBaseRevenue + gain).toLocaleString("en-IN");
-    }
-
-    // Copies the generated WhatsApp/Email retention offer to the user's clipboard
+    // Copies the customer outreach note to clipboard
     function copyCampaign() {
       const msg = document.getElementById("c360Message");
       msg.select();
       navigator.clipboard.writeText(msg.value);
-      alert("Copied personalized campaign message to clipboard!");
     }
 
-    // Fetches all registered stores from the database and populates the top navbar Store dropdown
-    async function refreshStoresDropdown(selectApiKey = null) {
-      try {
-        const res = await fetch("/api/stores");
-        if (!res.ok) return;
-        const data = await res.json();
-        const selector = document.getElementById("storeSelector");
-        const currentVal = selectApiKey || selector.value || "key-store-a-123";
-
-        selector.innerHTML = (data.stores || []).map(s =>
-          `<option value="${s.api_key}" class="bg-slate-900 text-white">${s.store_name} (${s.tenant_id})</option>`
-        ).join("");
-
-        selector.value = currentVal;
-      } catch (e) {
-        // Ignore if backend is still booting
-      }
-    }
-    
-    // Automatically load the default store's data as soon as the webpage opens
-   // Load all saved stores into the dropdown and then load the active store's dashboard
-    window.onload = () => refreshStoresDropdown().then(() => loadStoreData(0));
+    // Load saved datasets into the left sidebar and display the most recent dataset on startup
+    window.onload = () => refreshDatasetSidebar().then(() => loadStoreData(0));
   </script>
 </body>
 </html>
