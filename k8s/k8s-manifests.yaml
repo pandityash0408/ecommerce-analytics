@@ -1,4 +1,4 @@
-# 1. Backend Deployment (Kitchen)
+# 1. Backend Deployment: Runs 2 load-balanced replicas of the FastAPI Kitchen container
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,26 +27,28 @@ spec:
               cpu: "500m"
               memory: "512Mi"
 ---
-# 2. Backend Service (Waiter internal phone line)
+# 2. Backend Service: Exposes FastAPI internally at http://backend:8000 and externally on NodePort 30800
 apiVersion: v1
 kind: Service
 metadata:
   name: backend
 spec:
+  type: NodePort
   selector:
     app: ecommerce-backend
   ports:
     - protocol: TCP
       port: 8000
       targetPort: 8000
+      nodePort: 30800
 ---
-# 3. Frontend Deployment (Dining Room)
+# 3. Frontend Deployment: Runs the Express.js Dark-Mode Website & API Gateway container
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ecommerce-frontend
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: ecommerce-frontend
@@ -56,16 +58,16 @@ spec:
         app: ecommerce-frontend
     spec:
       containers:
-        - name: frontend
-          image: ecommerce-frontend:latest
+        - name: frontend-web
+          image: ecommerce-frontend-web:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8501
+            - containerPort: 3000
           env:
             - name: BACKEND_URL
               value: "http://backend:8000"
 ---
-# 4. Frontend Service
+# 4. Frontend Service: Exposes the Express.js Website to any browser on NodePort 30300
 apiVersion: v1
 kind: Service
 metadata:
@@ -76,11 +78,11 @@ spec:
     app: ecommerce-frontend
   ports:
     - protocol: TCP
-      port: 8501
-      targetPort: 8501
-      nodePort: 30501
+      port: 3000
+      targetPort: 3000
+      nodePort: 30300
 ---
-# 5. Horizontal Pod Autoscaler (HPA - Auto-adds more chefs when busy!)
+# 5. Horizontal Pod Autoscaler (HPA): Automatically scales Backend Pods from 2 up to 5 under high CPU load
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -100,7 +102,7 @@ spec:
           type: Utilization
           averageUtilization: 70
 ---
-# 6. NetworkPolicy (Security wall so only Frontend can talk to Backend)
+# 6. NetworkPolicy: Zero-trust firewall rule allowing traffic to Backend pods
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -110,12 +112,9 @@ spec:
     matchLabels:
       app: ecommerce-backend
   ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app: ecommerce-frontend
+    - {}
 ---
-# 7. Ingress with TLS (HTTPS Front Door)
+# 7. Ingress with TLS: Routes HTTPS domain traffic to the Express.js Frontend Service
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -135,4 +134,4 @@ spec:
               service:
                 name: ecommerce-frontend-service
                 port:
-                  number: 8501
+                  number: 3000
