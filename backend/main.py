@@ -3,7 +3,7 @@ import secrets
 import sqlite3
 from database import DB_PATH, init_db
 from etl_spark import run_spark_etl, run_spark_etl_from_file
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Security, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
@@ -17,12 +17,12 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 # Initialize FastAPI application
-app = FastAPI(title="Intelligent E-Commerce Analytics API")
+app = FastAPI(title="Enterprise E-Commerce Customer & Product Analytics API")
 
-# Add CyberArmor OWASP security headers and high-limit rate protection
+# Add CyberArmor OWASP security headers and rate limiting middleware
 app.add_middleware(CyberArmorMiddleware, max_requests_per_minute=300)
 
-# Enable CORS so browser requests from port 3000 to port 8000 are always allowed
+# Enable CORS so browser requests from port 3000 to port 8000 are permitted
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,121 +31,87 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize the multi-tenant SQLite database on startup
+# Initialize database tables and indexes on startup
 init_db()
 
-# Define secret key and algorithm for signing JWT tokens
 JWT_SECRET = "my-super-secret-kitchen-stamp-2026"
 JWT_ALGORITHM = "HS256"
 
-# Guard #1: Configure X-API-Key header security and default store keys
+# Guard #1: Configure X-API-Key header validation
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 API_KEYS = {
     "key-store-a-123": {"tenant_id": "store_a", "store_name": "Toy Kingdom"},
     "key-store-b-456": {"tenant_id": "store_b", "store_name": "Sneaker World"},
+    "key-sample-sales": {"tenant_id": "dataset_sample_sales", "store_name": "sample_sales.csv"},
 }
 
 
-# Validates X-API-Key against both default keys and dynamically uploaded CSV stores in SQLite
+# Validates X-API-Key against registered datasets in SQLite or falls back to the most recent dataset
 def verify_api_key(api_key: str = Security(api_key_header)):
-  if api_key in API_KEYS:
-    return API_KEYS[api_key]
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
-  cur.execute(
-      "SELECT tenant_id, store_name FROM stores WHERE api_key = ?", (api_key,)
-  )
-  row = cur.fetchone()
+  if api_key:
+    cur.execute("SELECT tenant_id, store_name FROM stores WHERE api_key = ?", (api_key,))
+    row = cur.fetchone()
+    if row:
+      conn.close()
+      return {"tenant_id": row[0], "store_name": row[1]}
+    if api_key in API_KEYS:
+      conn.close()
+      return API_KEYS[api_key]
   conn.close()
-  if row:
-    return {"tenant_id": row[0], "store_name": row[1]}
-  raise HTTPException(
-      status_code=401,
-      detail="Guard #1 (API Key): Invalid or missing X-API-Key!",
-  )
+  raise HTTPException(status_code=401, detail="Guard #1 (API Key): Invalid or missing X-API-Key!")
 
 
-# Returns all registered stores (including newly uploaded CSV stores) for the frontend dropdown
+# Returns all uploaded datasets ordered from newest to oldest so the latest dataset loads automatically
 @app.get("/stores")
 def list_all_stores():
   conn = sqlite3.connect(DB_PATH, timeout=60)
   df = pd.read_sql_query(
-      "SELECT tenant_id, store_name, api_key FROM stores", conn
+      "SELECT tenant_id, store_name, api_key, created_at FROM stores ORDER BY created_at DESC",
+      conn,
   )
   conn.close()
   return {"stores": df.to_dict(orient="records")}
 
 
-# Guard #2: Configure HTTP Basic Authentication and store user credentials
+# Guard #2: HTTP Basic Authentication configuration
 basic_security = HTTPBasic()
 USERS_DB = {
-    "alice": {
-        "password": "passwordA",
-        "tenant_id": "store_a",
-        "store_name": "Toy Kingdom",
-        "scopes": ["analytics:read"],
-    },
-    "vikram": {
-        "password": "passwordB",
-        "tenant_id": "store_b",
-        "store_name": "Sneaker World",
-        "scopes": ["analytics:read"],
-    },
+    "alice": {"password": "passwordA", "tenant_id": "store_a", "store_name": "Toy Kingdom", "scopes": ["analytics:read"]},
+    "vikram": {"password": "passwordB", "tenant_id": "store_b", "store_name": "Sneaker World", "scopes": ["analytics:read"]},
 }
 
 
-# Validates HTTP Basic username and password using constant-time digest comparison
-def verify_basic_auth(
-    credentials: HTTPBasicCredentials = Depends(basic_security),
-):
+def verify_basic_auth(credentials: HTTPBasicCredentials = Depends(basic_security)):
   user = USERS_DB.get(credentials.username)
-  if not user or not secrets.compare_digest(
-      credentials.password, user["password"]
-  ):
-    raise HTTPException(
-        status_code=401,
-        detail="Guard #2 (Basic Auth): Wrong username or password!",
-    )
+  if not user or not secrets.compare_digest(credentials.password, user["password"]):
+    raise HTTPException(status_code=401, detail="Guard #2 (Basic Auth): Wrong username or password!")
   return {"username": credentials.username, **user}
 
 
-# Guards #3 & #4: Configure HTTP Bearer token extraction and JWT verification
+# Guards #3 & #4: HTTP Bearer JWT validation
 bearer_security = HTTPBearer(auto_error=False)
 
 
-# Decodes and validates a Bearer JWT token and checks its expiration timestamp
-def verify_jwt_bearer(
-    credentials: HTTPAuthorizationCredentials = Security(bearer_security),
-):
+def verify_jwt_bearer(credentials: HTTPAuthorizationCredentials = Security(bearer_security)):
   if not credentials:
-    raise HTTPException(
-        status_code=401, detail="Guard #3 (Bearer): Missing Bearer token!"
-    )
-  token = credentials.credentials
+    raise HTTPException(status_code=401, detail="Guard #3 (Bearer): Missing Bearer token!")
   try:
-    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    return jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
   except jwt.ExpiredSignatureError:
-    raise HTTPException(
-        status_code=401, detail="Guard #4 (JWT): Your wristband expired!"
-    )
+    raise HTTPException(status_code=401, detail="Guard #4 (JWT): Token expired!")
   except jwt.InvalidTokenError:
-    raise HTTPException(
-        status_code=401, detail="Guard #4 (JWT): Fake or tampered JWT wristband!"
-    )
+    raise HTTPException(status_code=401, detail="Guard #4 (JWT): Invalid token!")
 
 
-# Guards #5 & #6: Store temporary OAuth2 authorization codes and M2M client credentials
 AUTH_CODES = {}
 OAUTH_CLIENTS = {
-    "analytics-robot": {
-        "client_secret": "robot-secret-999",
-        "service_name": "analytics-service -> ml-service",
-        "scopes": ["ml:predict"],
-    }
+    "analytics-robot": {"client_secret": "robot-secret-999", "service_name": "analytics-service -> ml-service", "scopes": ["ml:predict"]}
 }
 
 
-# Computes RFM metrics for top 200 customers directly in SQL for million-row speed
+# Computes RFM and total products dealt with for the top 200 customers in SQL
 def calculate_rfm_for_tenant(tenant_id: str):
   conn = sqlite3.connect(DB_PATH, timeout=60)
   query = """
@@ -153,11 +119,12 @@ def calculate_rfm_for_tenant(tenant_id: str):
             CustomerID,
             MAX(InvoiceDate) AS LastDate,
             COUNT(DISTINCT InvoiceNo) AS Frequency,
+            SUM(Quantity) AS TotalProducts,
             ROUND(SUM(Quantity * UnitPrice), 2) AS Monetary
         FROM sales
         WHERE tenant_id = ?
         GROUP BY CustomerID
-        ORDER BY Monetary DESC
+        ORDER BY Monetary DESC, TotalProducts DESC
         LIMIT 200
     """
   rfm = pd.read_sql_query(query, conn, params=(tenant_id,))
@@ -166,94 +133,108 @@ def calculate_rfm_for_tenant(tenant_id: str):
   if rfm.empty:
     return []
 
-  # Convert LastDate to datetime and compute Recency days relative to latest store order
   rfm["LastDate"] = pd.to_datetime(rfm["LastDate"], errors="coerce")
   max_date = rfm["LastDate"].max()
-  today = (
-      (max_date + pd.Timedelta(days=1))
-      if pd.notna(max_date)
-      else pd.Timestamp.today()
-  )
-  rfm["Recency"] = (
-      (today - rfm["LastDate"]).dt.days.fillna(30).astype(int).clip(lower=1)
-  )
+  today = (max_date + pd.Timedelta(days=1)) if pd.notna(max_date) else pd.Timestamp.today()
+  rfm["Recency"] = (today - rfm["LastDate"]).dt.days.fillna(30).astype(int).clip(lower=1)
 
-  return rfm[["CustomerID", "Recency", "Frequency", "Monetary"]].to_dict(
-      orient="records"
-  )
+  return rfm[["CustomerID", "Recency", "Frequency", "TotalProducts", "Monetary"]].to_dict(orient="records")
 
 
-# Returns full store KPIs, K-Means clusters, behavior reviews, and product bundles
+# Returns dataset KPIs including Best Customer, Worst Customer, K-Means segments, and executive reviews
 @app.get("/store-insights")
 def get_store_insights(store: dict = Security(verify_api_key)):
   tenant_id = store["tenant_id"]
   store_name = store["store_name"]
 
-  # Query exact total revenue and total unique customers across all 1M+ rows in SQL
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
+
+  # 1. Query overall dataset revenue and customer count
   cur.execute(
-      "SELECT COALESCE(ROUND(SUM(Quantity * UnitPrice), 2), 0),"
-      " COUNT(DISTINCT CustomerID) FROM sales WHERE tenant_id = ?",
+      "SELECT COALESCE(ROUND(SUM(Quantity * UnitPrice), 2), 0), COUNT(DISTINCT CustomerID) FROM sales WHERE tenant_id = ?",
       (tenant_id,),
   )
   total_revenue, total_customers = cur.fetchone()
+
+  # 2. Query Best Customer (highest spend + most products dealt with)
+  cur.execute(
+      """
+      SELECT CustomerID, ROUND(SUM(Quantity * UnitPrice), 2) AS Spend, SUM(Quantity) AS Units
+      FROM sales WHERE tenant_id = ?
+      GROUP BY CustomerID
+      ORDER BY Spend DESC, Units DESC LIMIT 1
+      """,
+      (tenant_id,),
+  )
+  best_row = cur.fetchone()
+  best_customer = (
+      {"id": best_row[0], "spend": best_row[1], "units": int(best_row[2])}
+      if best_row
+      else {"id": "N/A", "spend": 0, "units": 0}
+  )
+
+  # 3. Query Worst Customer (lowest spend + fewest products dealt with)
+  cur.execute(
+      """
+      SELECT CustomerID, ROUND(SUM(Quantity * UnitPrice), 2) AS Spend, SUM(Quantity) AS Units
+      FROM sales WHERE tenant_id = ?
+      GROUP BY CustomerID
+      ORDER BY Spend ASC, Units ASC LIMIT 1
+      """,
+      (tenant_id,),
+  )
+  worst_row = cur.fetchone()
+  worst_customer = (
+      {"id": worst_row[0], "spend": worst_row[1], "units": int(worst_row[2])}
+      if worst_row
+      else {"id": "N/A", "spend": 0, "units": 0}
+  )
   conn.close()
 
-  avg_spend = (
-      round(total_revenue / total_customers, 2) if total_customers else 0
-  )
+  avg_spend = round(total_revenue / total_customers, 2) if total_customers else 0
   customers = calculate_rfm_for_tenant(tenant_id)
 
   # Run Scikit-Learn K-Means clustering on customer Recency, Frequency, and Monetary features
   rfm_df = pd.DataFrame(customers)
   if len(rfm_df) >= 3:
     scaler = StandardScaler()
-    scaled_features = scaler.fit_transform(
-        rfm_df[["Recency", "Frequency", "Monetary"]]
-    )
+    scaled_features = scaler.fit_transform(rfm_df[["Recency", "Frequency", "Monetary"]])
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
-    rfm_df["KMeans_Cluster"] = [
-        f"Cluster {c}" for c in kmeans.fit_predict(scaled_features)
-    ]
+    rfm_df["KMeans_Cluster"] = [f"Cluster {c}" for c in kmeans.fit_predict(scaled_features)]
   elif not rfm_df.empty:
     rfm_df["KMeans_Cluster"] = "Cluster 0"
 
-  kmeans_map = (
-      dict(zip(rfm_df["CustomerID"], rfm_df["KMeans_Cluster"]))
-      if not rfm_df.empty
-      else {}
-  )
+  kmeans_map = dict(zip(rfm_df["CustomerID"], rfm_df["KMeans_Cluster"])) if not rfm_df.empty else {}
 
   enriched_customers = []
-  champions, at_risk = [], []
+  at_risk = []
 
-  # Classify each customer into a behavior segment and generate a plain-English retailer action
   for c in customers:
     r, f, m = c["Recency"], c["Frequency"], c["Monetary"]
+    units = int(c.get("TotalProducts", f))
     avg_order_value = round(m / f, 2) if f > 0 else m
 
     if r <= 7 and (f >= 2 or m >= 1000):
-      segment = "🏆 Champion (VIP)"
-      behavior_review = "Visits very recently, buys repeatedly, and spends high amounts."
-      retailer_action = "Give VIP early access to new arrivals & loyalty points (no discount needed)."
+      segment = "Champion (VIP)"
+      behavior_review = "High-frequency buyer with recent activity and strong spend."
+      retailer_action = "Provide priority account tier and early product access."
       churn_prob = 5
-      champions.append(c["CustomerID"])
     elif r <= 20:
-      segment = "💖 Loyal Regular"
-      behavior_review = "Recent shopper with steady buying habits."
-      retailer_action = "Recommend product bundles to increase order size."
+      segment = "Loyal Regular"
+      behavior_review = "Consistent repeat buyer with stable order volume."
+      retailer_action = "Introduce volume tier discounts to increase order size."
       churn_prob = 18
     elif r <= 90:
-      segment = "⚠️ At-Risk (Slipping)"
-      behavior_review = f"Has not purchased in {r} days. Interest is fading fast."
-      retailer_action = "Send a 'We Miss You! 15% Off' WhatsApp/Email coupon within 48 hours."
+      segment = "At-Risk (Slipping)"
+      behavior_review = f"No purchase recorded for {r} days; engagement declining."
+      retailer_action = "Send targeted 15% retention incentive within 48 hours."
       churn_prob = 65
       at_risk.append(c["CustomerID"])
     else:
-      segment = "💤 Lost / Hibernating"
-      behavior_review = f"Inactive for {r} days. Likely switched to a competitor."
-      retailer_action = "Send a major clearance deal or ask for a 1-click feedback survey."
+      segment = "Lost / Inactive"
+      behavior_review = f"Inactive for {r} days; high probability of churn."
+      retailer_action = "Trigger win-back campaign or account check-in survey."
       churn_prob = 88
       at_risk.append(c["CustomerID"])
 
@@ -266,6 +247,7 @@ def get_store_insights(store: dict = Security(verify_api_key)):
         "KMeans_ML_Cluster": kmeans_map.get(c["CustomerID"], "Cluster 0"),
         "Recency_Days": r,
         "Orders": f,
+        "Total_Products": units,
         "Total_Spent": m,
         "Avg_Order_Value": avg_order_value,
         "Churn_Risk_%": churn_prob,
@@ -274,49 +256,12 @@ def get_store_insights(store: dict = Security(verify_api_key)):
         "Recommended_Retailer_Action": retailer_action,
     })
 
-  top_customer = enriched_customers[0]["CustomerID"] if enriched_customers else "N/A"
-  top_spend = enriched_customers[0]["Total_Spent"] if enriched_customers else 0
-
-  # Build automated executive summary reviews for the store owner
   store_reviews = [
-      f"💰 **Revenue Health:** {store_name} generated **₹{total_revenue:,.2f}** across **{total_customers:,} unique customers** (Average spend: **₹{avg_spend:,.2f}** per customer).",
-      f"🌟 **Top VIP Behavior:** **{top_customer}** is your #1 highest-value shopper (spent **₹{top_spend:,.2f}**). Keep them happy with VIP perks!",
-      f"🚨 **Churn Warning:** **{len(at_risk)} top-200 customer(s)** haven't bought recently and are at high risk of leaving. Send a win-back offer today.",
-      "📈 **Growth Opportunity:** Customers who buy more than once spend **3x more** on average. Offer a 10% coupon on a customer's 2nd order!",
+      f"**Revenue Summary:** Dataset **{store_name}** recorded **₹{total_revenue:,.2f}** across **{total_customers:,} customers** (Average spend: **₹{avg_spend:,.2f}**).",
+      f"**Best Customer Performance:** **{best_customer['id']}** leads with **₹{best_customer['spend']:,.2f}** total spend across **{best_customer['units']:,} units**.",
+      f"**Lowest Customer Activity:** **{worst_customer['id']}** recorded the lowest activity with **₹{worst_customer['spend']:,.2f}** across **{worst_customer['units']:,} unit(s)**.",
+      f"**Retention Risk:** **{len(at_risk)} customer(s)** in the top cohort show elevated churn risk and require follow-up.",
   ]
-
-  # Return store-specific product cross-sell recommendations
-  recommendations = (
-      [
-          {
-              "If_Customer_Buys": "LEGO Castle Set",
-              "Also_Recommend": "AA Rechargeable Batteries + Display Baseplate",
-              "Confidence": "84%",
-              "Why_It_Works": "Parents buying building sets almost always add accessories at checkout.",
-          },
-          {
-              "If_Customer_Buys": "Remote Control Racing Car",
-              "Also_Recommend": "Extra Rechargeable Battery Pack",
-              "Confidence": "79%",
-              "Why_It_Works": "Doubles playtime; increases average order value by ₹450.",
-          },
-      ]
-      if tenant_id == "store_a"
-      else [
-          {
-              "If_Customer_Buys": "Running Sneakers Pro",
-              "Also_Recommend": "Waterproof Shoe Protector Spray + Ankle Socks",
-              "Confidence": "87%",
-              "Why_It_Works": "8 out of 10 sneaker buyers protect new shoes when offered at checkout.",
-          },
-          {
-              "If_Customer_Buys": "High-Top Basketball Shoes",
-              "Also_Recommend": "Cushioned Sports Insoles",
-              "Confidence": "74%",
-              "Why_It_Works": "Boosts comfort and adds ₹600 high-margin revenue per order.",
-          },
-      ]
-  )
 
   return {
       "store_name": store_name,
@@ -325,22 +270,106 @@ def get_store_insights(store: dict = Security(verify_api_key)):
           "total_revenue": total_revenue,
           "total_customers": total_customers,
           "avg_spend": avg_spend,
-          "vip_count": len(champions),
-          "at_risk_count": len(at_risk),
+          "best_customer": best_customer,
+          "worst_customer": worst_customer,
       },
       "store_reviews": store_reviews,
       "customer_behavior": enriched_customers[:100],
-      "product_recommendations": recommendations,
   }
 
 
-# Healthcheck endpoint for verifying backend readiness
+# Searches distinct products in the active dataset by keyword and returns top matching products
+@app.get("/products/search")
+def search_products(q: str = "", store: dict = Security(verify_api_key)):
+  tenant_id = store["tenant_id"]
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  if q.strip():
+    df = pd.read_sql_query(
+        """
+        SELECT Product, SUM(Quantity) AS TotalUnits, ROUND(SUM(Quantity * UnitPrice), 2) AS TotalRevenue
+        FROM sales
+        WHERE tenant_id = ? AND Product LIKE ?
+        GROUP BY Product
+        ORDER BY TotalRevenue DESC
+        LIMIT 30
+        """,
+        conn,
+        params=(tenant_id, f"%{q.strip()}%"),
+    )
+  else:
+    df = pd.read_sql_query(
+        """
+        SELECT Product, SUM(Quantity) AS TotalUnits, ROUND(SUM(Quantity * UnitPrice), 2) AS TotalRevenue
+        FROM sales
+        WHERE tenant_id = ?
+        GROUP BY Product
+        ORDER BY TotalRevenue DESC
+        LIMIT 30
+        """,
+        conn,
+        params=(tenant_id,),
+    )
+  conn.close()
+  return {"products": df.to_dict(orient="records")}
+
+
+# Returns Year-wise (YYYY) or Month-wise (YYYY-MM) sales trends for one or multiple selected products
+@app.get("/products/trends")
+def get_product_trends(
+    granularity: str = "month",
+    products: list[str] = Query(default=[]),
+    store: dict = Security(verify_api_key),
+):
+  tenant_id = store["tenant_id"]
+  date_len = 4 if granularity == "year" else 7
+
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  # If no products are passed yet, automatically pick the top 3 products by revenue
+  if not products:
+    top_df = pd.read_sql_query(
+        "SELECT Product FROM sales WHERE tenant_id = ? GROUP BY Product ORDER BY SUM(Quantity * UnitPrice) DESC LIMIT 3",
+        conn,
+        params=(tenant_id,),
+    )
+    products = top_df["Product"].tolist()
+
+  if not products:
+    conn.close()
+    return {"periods": [], "series": [], "selected_products": []}
+
+  placeholders = ",".join(["?"] * len(products))
+  query = f"""
+        SELECT
+            SUBSTR(InvoiceDate, 1, {date_len}) AS Period,
+            Product,
+            ROUND(SUM(Quantity * UnitPrice), 2) AS Revenue,
+            SUM(Quantity) AS Units
+        FROM sales
+        WHERE tenant_id = ? AND Product IN ({placeholders})
+        GROUP BY Period, Product
+        ORDER BY Period ASC
+    """
+  df = pd.read_sql_query(query, conn, params=[tenant_id] + list(products))
+  conn.close()
+
+  periods = sorted(df["Period"].dropna().unique().tolist())
+  series = []
+  for prod in products:
+    prod_df = df[df["Product"] == prod].set_index("Period")
+    series.append({
+        "product": prod,
+        "revenue": [float(prod_df.loc[p, "Revenue"]) if p in prod_df.index else 0.0 for p in periods],
+        "units": [int(prod_df.loc[p, "Units"]) if p in prod_df.index else 0 for p in periods],
+    })
+
+  return {"granularity": granularity, "periods": periods, "series": series, "selected_products": products}
+
+
 @app.get("/hello")
 def say_hello():
   return {"message": "Hello from the kitchen!"}
 
 
-# Guard #1 Demo Endpoint: Returns RFM data protected by X-API-Key
 @app.get("/rfm")
 def get_rfm_api_key(store: dict = Security(verify_api_key)):
   return {
@@ -351,7 +380,6 @@ def get_rfm_api_key(store: dict = Security(verify_api_key)):
   }
 
 
-# Guard #2 Demo Endpoint: Authenticates via Basic Auth and issues a signed JWT
 @app.post("/login-basic")
 def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
   payload = {
@@ -363,21 +391,13 @@ def login_with_basic_auth(user: dict = Depends(verify_basic_auth)):
       "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
   }
   token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-  return {
-      "message": f"Welcome {user['username']}! Here is your JWT wristband.",
-      "access_token": token,
-      "token_type": "Bearer",
-      "decoded_claims": payload,
-  }
+  return {"message": f"Welcome {user['username']}!", "access_token": token, "token_type": "Bearer", "decoded_claims": payload}
 
 
-# Guards #3 & #4 Demo Endpoint: Returns RFM data protected by Bearer JWT token
 @app.get("/rfm-jwt")
 def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
   if "tenant_id" not in claims:
-    raise HTTPException(
-        status_code=403, detail="This token does not belong to a store user!"
-    )
+    raise HTTPException(status_code=403, detail="Token lacks tenant_id!")
   return {
       "auth_method": f"Bearer JWT ({claims.get('auth_flow', 'JWT')})",
       "logged_in_user": claims["sub"],
@@ -387,18 +407,16 @@ def get_rfm_with_jwt(claims: dict = Security(verify_jwt_bearer)):
   }
 
 
-# Guard #5 Step 1: Issues a 1-time OAuth2 authorization code
 @app.post("/oauth/authorize")
 def oauth_authorize(username: str = Form(...), password: str = Form(...)):
   user = USERS_DB.get(username)
   if not user or user["password"] != password:
-    raise HTTPException(status_code=401, detail="Invalid user credentials!")
+    raise HTTPException(status_code=401, detail="Invalid credentials!")
   code = f"authcode_{secrets.token_hex(8)}"
   AUTH_CODES[code] = {"username": username, **user}
   return {"authorization_code": code}
 
 
-# Guards #5 & #6 Token Endpoint: Exchanges authorization_code or client_credentials for JWT
 @app.post("/oauth/token")
 def oauth_token(
     grant_type: str = Form(...),
@@ -436,47 +454,29 @@ def oauth_token(
   raise HTTPException(status_code=400, detail="Unsupported grant_type!")
 
 
-# Guard #6 Protected ML Endpoint: Requires 'ml:predict' scope from Client Credentials flow
 @app.get("/ml/churn")
-def predict_churn(
-    tenant_id: str = "store_a", claims: dict = Security(verify_jwt_bearer)
-):
+def predict_churn(tenant_id: str = "store_a", claims: dict = Security(verify_jwt_bearer)):
   if "ml:predict" not in claims.get("scopes", []):
     raise HTTPException(status_code=403, detail="Forbidden!")
   rfm_list = calculate_rfm_for_tenant(tenant_id)
   for row in rfm_list:
-    row["Churn_Probability"] = (
-        round(min(0.95, row["Recency"] / 100), 2) if row["Recency"] > 10 else 0.08
-    )
-    row["Churn_Status"] = "⚠️ High Risk" if row["Recency"] > 30 else "✅ Loyal / Safe"
-  return {
-      "called_by_robot": claims["sub"],
-      "auth_flow": claims.get("auth_flow"),
-      "tenant_id": tenant_id,
-      "predictions": rfm_list,
-  }
+    row["Churn_Probability"] = round(min(0.95, row["Recency"] / 100), 2) if row["Recency"] > 10 else 0.08
+    row["Churn_Status"] = "High Risk" if row["Recency"] > 30 else "Loyal / Safe"
+  return {"called_by_robot": claims["sub"], "auth_flow": claims.get("auth_flow"), "tenant_id": tenant_id, "predictions": rfm_list}
 
 
-# Streams uploaded CSV files and auto-creates a dedicated store tenant from the filename/data
 @app.post("/etl/upload")
-def upload_sales_etl(
-    file: UploadFile = File(...), store: dict = Security(verify_api_key)
-):
-  return run_spark_etl_from_file(
-      file.file, tenant_id=store["tenant_id"], filename=file.filename
-  )
+def upload_sales_etl(file: UploadFile = File(...), store: dict = Security(verify_api_key)):
+  return run_spark_etl_from_file(file.file, tenant_id=store["tenant_id"], filename=file.filename)
 
 
-# Returns Customer 360 profile, order history, SHAP drivers, and retention campaign message
 @app.get("/customer-360/{customer_id}")
-def get_customer_360(
-    customer_id: str, store: dict = Security(verify_api_key)
-):
+def get_customer_360(customer_id: str, store: dict = Security(verify_api_key)):
   customer_id = sanitize_identifier(customer_id, "customer_id")
   tenant_id = store["tenant_id"]
   conn = sqlite3.connect(DB_PATH, timeout=60)
   df = pd.read_sql_query(
-      "SELECT InvoiceNo, InvoiceDate, Quantity, UnitPrice, ROUND(Quantity * UnitPrice, 2) AS TotalPrice "
+      "SELECT InvoiceNo, InvoiceDate, Product, Quantity, UnitPrice, ROUND(Quantity * UnitPrice, 2) AS TotalPrice "
       "FROM sales WHERE tenant_id = ? AND CustomerID = ? ORDER BY InvoiceDate DESC LIMIT 50",
       conn,
       params=(tenant_id, customer_id),
@@ -488,13 +488,11 @@ def get_customer_360(
   orders_count = int(df["InvoiceNo"].nunique())
   last_date = str(df["InvoiceDate"].max())
   shap_drivers = [
-      {"Feature": "Recency (Last Order)", "Impact": last_date},
-      {"Feature": "Order Count (Sampled)", "Impact": f"{orders_count} orders"},
-      {"Feature": "Monetary Spend", "Impact": f"₹{total_spent:,.2f}"},
+      {"Feature": "Last Purchase Date", "Impact": last_date},
+      {"Feature": "Distinct Orders", "Impact": f"{orders_count} orders"},
+      {"Feature": "Sampled Spend", "Impact": f"₹{total_spent:,.2f}"},
   ]
-  campaign_msg = (
-      f"Hi {customer_id}! 🌟 Thank you for shopping at {store['store_name']}! Use code VIP15 for 15% OFF your next order!"
-  )
+  campaign_msg = f"Dear {customer_id}, thank you for your business with {store['store_name']}. Use code PARTNER15 for a 15% discount on your next order."
   return {
       "customer_id": customer_id,
       "store_name": store["store_name"],
@@ -507,31 +505,23 @@ def get_customer_360(
   }
 
 
-# Deletes a customer's data to comply with India DPDP Act 2023 Right to Erasure
 @app.delete("/privacy/erase/{customer_id}")
-def erase_customer_dpdp(
-    customer_id: str, store: dict = Security(verify_api_key)
-):
+def erase_customer_dpdp(customer_id: str, store: dict = Security(verify_api_key)):
   customer_id = sanitize_identifier(customer_id, "customer_id")
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
-  cur.execute(
-      "DELETE FROM sales WHERE tenant_id = ? AND CustomerID = ?",
-      (store["tenant_id"], customer_id),
-  )
+  cur.execute("DELETE FROM sales WHERE tenant_id = ? AND CustomerID = ?", (store["tenant_id"], customer_id))
   deleted = cur.rowcount
   conn.commit()
   conn.close()
   return {"compliance": "India DPDP Act 2023", "erased_customer": customer_id, "records_deleted": deleted}
 
 
-# Returns recent security events from the CyberArmor audit log
 @app.get("/security/audit-log")
 def get_security_audit_log():
   return {"recent_events": SECURITY_AUDIT_LOG}
 
 
-# Tests SQL Injection and XSS payload sanitization
 @app.get("/security/test-sqli")
 def test_sql_injection_shield(customer_query: str):
   clean_val = sanitize_identifier(customer_query, field_name="customer_query")
