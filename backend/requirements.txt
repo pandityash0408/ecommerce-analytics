@@ -7,3 +7,5 @@ pyarrow
 pytest
 httpx
 scikit-learn
+openpyxl
+lxml
