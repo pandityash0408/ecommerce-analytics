@@ -7,7 +7,8 @@ const PORT = process.env.PORT || 3000;
 const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
 app.use(cors());
-app.use(express.json({ limit: "250mb" }));
+// Allow raw CSV slices up to 25MB per chunk over same-origin HTTP
+app.use(express.json({ limit: "25mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // Returns all saved datasets ordered from newest to oldest
@@ -81,6 +82,25 @@ app.delete("/api/privacy/erase/:id", async (req, res) => {
     const response = await fetch(`${BACKEND_URL}/privacy/erase/${encodeURIComponent(req.params.id)}`, {
       method: "DELETE",
       headers: { "X-API-Key": apiKey },
+    });
+    res.status(response.status).json(await response.json());
+  } catch (err) {
+    res.status(500).json({ detail: err.message });
+  }
+});
+
+// Forwards 5MB file slices from browser to FastAPI backend over internal Docker network (zero CORS issues)
+app.post("/api/etl-chunk", async (req, res) => {
+  try {
+    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
+    const { filename, csvChunkText } = req.body;
+    const formData = new FormData();
+    formData.append("file", new Blob([csvChunkText], { type: "text/csv" }), filename);
+
+    const response = await fetch(`${BACKEND_URL}/etl/upload`, {
+      method: "POST",
+      headers: { "X-API-Key": apiKey },
+      body: formData,
     });
     res.status(response.status).json(await response.json());
   } catch (err) {
