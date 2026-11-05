@@ -1,41 +1,37 @@
 import os
 import sqlite3
 
-# Define the path to the SQLite database file inside the backend directory
+# Define the path to the persistent SQLite database file inside the backend folder
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "ecommerce.db")
 
 
-# Initializes the sales table, the dynamic stores registry table, and starter data
+# Initializes the database schema, adds the Product column, and indexes for fast queries
 def init_db():
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cursor = conn.cursor()
 
-  # Enable Write-Ahead Logging (WAL) for high-speed million-row reads and writes
+  # Enable Write-Ahead Logging (WAL) for high-speed concurrent reads and million-row writes
   cursor.execute("PRAGMA journal_mode=WAL;")
   cursor.execute("PRAGMA synchronous=NORMAL;")
 
-  # Create the stores table to store dynamically created stores from uploaded CSV files
+  # Create the stores table to persist every uploaded dataset file and its upload timestamp
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS stores (
             tenant_id TEXT PRIMARY KEY,
             store_name TEXT NOT NULL,
-            api_key TEXT UNIQUE NOT NULL
+            api_key TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-  # Seed the default two demo stores if the stores table is empty
-  cursor.execute("SELECT COUNT(*) FROM stores")
-  if cursor.fetchone()[0] == 0:
-    cursor.executemany(
-        "INSERT INTO stores (tenant_id, store_name, api_key) VALUES (?, ?, ?)",
-        [
-            ("store_a", "Toy Kingdom", "key-store-a-123"),
-            ("store_b", "Sneaker World", "key-store-b-456"),
-        ],
-    )
+  # Safely add created_at column if upgrading from an older stores table
+  try:
+    cursor.execute("ALTER TABLE stores ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+  except sqlite3.OperationalError:
+    pass
 
-  # Create the multi-tenant sales table with a composite index on tenant_id and CustomerID
+  # Create the sales table including the Product column for product-level trend analysis
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,34 +39,43 @@ def init_db():
             InvoiceNo TEXT NOT NULL,
             CustomerID TEXT NOT NULL,
             InvoiceDate TEXT NOT NULL,
+            Product TEXT DEFAULT 'General Item',
             Quantity INTEGER NOT NULL,
             UnitPrice REAL NOT NULL
         )
     """)
-  cursor.execute(
-      "CREATE INDEX IF NOT EXISTS idx_sales_tenant ON sales(tenant_id, CustomerID);"
-  )
 
-  # Seed starter sales for Store A and Store B if the sales table is empty
-  cursor.execute("SELECT COUNT(*) FROM sales")
+  # Safely add the Product column if upgrading from an older sales table without losing data
+  try:
+    cursor.execute("ALTER TABLE sales ADD COLUMN Product TEXT DEFAULT 'General Item';")
+  except sqlite3.OperationalError:
+    pass
+
+  # Create composite indexes on tenant_id, CustomerID, and Product for fast search and grouping
+  cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_tenant ON sales(tenant_id, CustomerID);")
+  cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_product ON sales(tenant_id, Product);")
+
+  # Seed one starter dataset only if the database has zero datasets uploaded yet
+  cursor.execute("SELECT COUNT(*) FROM stores")
   if cursor.fetchone()[0] == 0:
+    cursor.execute(
+        "INSERT INTO stores (tenant_id, store_name, api_key) VALUES (?, ?, ?)",
+        ("dataset_sample_sales", "sample_sales.csv", "key-sample-sales"),
+    )
     sample_sales = [
-        ("store_a", "536365", "Priya", "2026-10-30", 20, 100.0),
-        ("store_a", "536366", "Priya", "2026-10-27", 15, 80.0),
-        ("store_a", "536367", "Alice", "2026-10-29", 10, 50.0),
-        ("store_a", "536368", "Bob", "2026-09-10", 2, 30.0),
-        ("store_b", "900001", "Vikram", "2026-10-30", 50, 200.0),
-        ("store_b", "900002", "Neha", "2026-10-28", 12, 150.0),
-        ("store_b", "900003", "Kabir", "2026-08-01", 1, 90.0),
+        ("dataset_sample_sales", "536365", "Priya", "2026-08-15", "Wireless Mouse", 20, 100.0),
+        ("dataset_sample_sales", "536366", "Priya", "2026-09-20", "Mechanical Keyboard", 15, 80.0),
+        ("dataset_sample_sales", "536367", "Alice", "2026-10-10", "Wireless Mouse", 10, 50.0),
+        ("dataset_sample_sales", "536368", "Bob", "2026-10-25", "USB-C Hub", 2, 30.0),
     ]
     cursor.executemany(
         """
-            INSERT INTO sales (tenant_id, InvoiceNo, CustomerID, InvoiceDate, Quantity, UnitPrice)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO sales (tenant_id, InvoiceNo, CustomerID, InvoiceDate, Product, Quantity, UnitPrice)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         sample_sales,
     )
 
-  # Save all changes and close the database connection
+  # Commit schema updates and close the connection
   conn.commit()
   conn.close()
