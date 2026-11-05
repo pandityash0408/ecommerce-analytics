@@ -380,7 +380,7 @@
       const toast = document.getElementById("etlToast");
       const toastText = document.getElementById("etlToastText");
       const progressBar = document.getElementById("etlProgressBar");
-      const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+      const sizeMB = (file.size / (2048 * 2048)).toFixed(1);
 
       toast.classList.remove("hidden");
       progressBar.style.width = "5%";
@@ -389,9 +389,10 @@
       const formData = new FormData();
       formData.append("file", file);
 
-      // Use XMLHttpRequest to track real-time upload progress for 260MB+ files
+     // Automatically route to Kubernetes NodePort 30800 if opened on K8s port 30300, else Docker port 8000
+      const backendPort = window.location.port === "30300" ? "30800" : "8000";
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", `${window.location.protocol}//${window.location.hostname}:8000/etl/upload`, true);
+      xhr.open("POST", `${window.location.protocol}//${window.location.hostname}:${backendPort}/etl/upload`, true);
       xhr.setRequestHeader("X-API-Key", apiKey);
 
       xhr.upload.onprogress = function (e) {
