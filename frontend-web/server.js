@@ -48,12 +48,13 @@ app.get("/api/products/search", async (req, res) => {
   }
 });
 
-// Fetches Year-wise or Month-wise sales trend series for one or multiple selected products
+// Fetches Year-wise or Month-wise sales trend series while preserving multiple 'products' query parameters
 app.get("/api/products/trends", async (req, res) => {
   try {
     const apiKey = req.headers["x-api-key"] || "key-sample-sales";
-    const qs = new URLSearchParams(req.query).toString();
-    const response = await fetch(`${BACKEND_URL}/products/trends?${qs}`, {
+    // Preserve multiple ?products=A&products=B parameters without joining them with a comma
+    const rawQuery = req.originalUrl.includes("?") ? req.originalUrl.split("?")[1] : "";
+    const response = await fetch(`${BACKEND_URL}/products/trends?${rawQuery}`, {
       headers: { "X-API-Key": apiKey },
     });
     res.status(response.status).json(await response.json());
