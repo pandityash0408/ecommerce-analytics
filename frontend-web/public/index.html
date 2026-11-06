@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Configure character set and responsive viewport -->
+  <!-- Configure character encoding and responsive viewport -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Customer Behavior & Product Analytics</title>
@@ -23,7 +23,6 @@
   <!-- TOP ENTERPRISE HEADER BAR: Sidebar Toggle, App Title, Active Dataset Filename, and Upload Button -->
   <header class="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-2.5 flex justify-between items-center">
     <div class="flex items-center space-x-3">
-      <!-- Button to open and close the Left Datasets Sidebar -->
       <button onclick="toggleSidebar()" class="p-1.5 rounded border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium" title="Toggle Datasets Sidebar">
         &#9776; Datasets
       </button>
@@ -31,7 +30,7 @@
       <h1 class="text-sm font-bold text-slate-900 tracking-tight">E-Commerce Customer Behavior Analytics</h1>
     </div>
 
-    <div class="flex items-center space-x-4">
+    <div class="flex items-center space-x-3">
       <!-- Displays ONLY the clean name of the currently active dataset file -->
       <span id="activeFileName" class="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded">
         Loading dataset...
@@ -61,8 +60,8 @@
   <!-- MAIN WORKSPACE: Collapsible Left Sidebar + High-Density Enterprise Content Area -->
   <div class="flex-1 flex overflow-hidden">
 
-    <!-- COLLAPSIBLE LEFT SIDEBAR: Lists all uploaded datasets saved in the database -->
-    <aside id="datasetSidebar" class="w-60 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col sidebar-transition">
+    <!-- COLLAPSIBLE LEFT SIDEBAR: Lists all uploaded datasets with a delete (x) button -->
+    <aside id="datasetSidebar" class="w-64 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col sidebar-transition">
       <div class="px-3.5 py-2.5 border-b border-slate-200 flex justify-between items-center">
         <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Uploaded Files</span>
         <span id="datasetCount" class="text-xs text-slate-400 font-medium">0</span>
@@ -75,104 +74,128 @@
     <!-- MAIN CONTENT AREA -->
     <main class="flex-1 overflow-y-auto p-5 space-y-5 max-w-[1600px] mx-auto">
 
-      <!-- ROW 1: 5 UNIFORM KPI CARDS (All 5 boxes have identical clean borders) -->
+      <!-- ROW 1: 5 UNIFORM KPI CARDS (Revenue, Customers & Repeat Rate, Avg Spend, Best Customer, Worst Customer) -->
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         <div class="panel p-3.5">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Revenue</p>
           <p id="kpiRevenue" class="text-xl font-bold text-slate-900 mt-1">₹0</p>
-          <p class="text-[11px] text-slate-400 mt-0.5">Cumulative dataset sales</p>
+          <p id="kpiOrdersSub" class="text-[11px] text-slate-500 mt-0.5">0 verified orders</p>
         </div>
 
         <div class="panel p-3.5">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Customers</p>
           <p id="kpiCustomers" class="text-xl font-bold text-slate-900 mt-1">0</p>
-          <p class="text-[11px] text-slate-400 mt-0.5">Distinct buyer accounts</p>
+          <p id="kpiRepeatRate" class="text-[11px] text-slate-600 font-medium mt-0.5">0% repeat buyer rate</p>
         </div>
 
         <div class="panel p-3.5">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Avg Spend / Customer</p>
           <p id="kpiAvgSpend" class="text-xl font-bold text-slate-900 mt-1">₹0</p>
-          <p class="text-[11px] text-slate-400 mt-0.5">Mean customer value</p>
+          <p class="text-[11px] text-slate-500 mt-0.5">Mean customer LTV</p>
         </div>
 
-        <!-- KPI 4: BEST CUSTOMER (Uniform border matching all other cards) -->
         <div class="panel p-3.5">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Best Customer</p>
           <p id="kpiBestId" class="text-base font-bold text-slate-900 mt-1 truncate">—</p>
-          <p id="kpiBestMeta" class="text-[11px] text-slate-600 mt-0.5">₹0 • 0 products</p>
+          <p id="kpiBestMeta" class="text-[11px] text-slate-600 mt-0.5">₹0 • 0 units</p>
         </div>
 
-        <!-- KPI 5: WORST CUSTOMER (Uniform border matching all other cards) -->
         <div class="panel p-3.5">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Worst Customer</p>
           <p id="kpiWorstId" class="text-base font-bold text-slate-900 mt-1 truncate">—</p>
-          <p id="kpiWorstMeta" class="text-[11px] text-slate-500 mt-0.5">₹0 • 0 products</p>
+          <p id="kpiWorstMeta" class="text-[11px] text-slate-500 mt-0.5">₹0 • 0 units</p>
         </div>
       </section>
 
-      <!-- ROW 2: FULL-WIDTH PRODUCT SALES ANALYSIS (Expanded to 100% width with taller chart canvas) -->
-      <section class="panel p-4 space-y-3">
-        <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2.5">
-          <div>
-            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Product Sales Analysis (Year-wise / Month-wise)</h2>
-            <p class="text-[11px] text-slate-500">Search and select one or multiple products to compare sales over time</p>
-          </div>
-
-          <!-- Granularity & Metric Selectors -->
-          <div class="flex items-center space-x-2">
-            <select id="trendGranularity" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none">
-              <option value="month">Month-wise (YYYY-MM)</option>
-              <option value="year">Year-wise (YYYY)</option>
-            </select>
-            <select id="trendMetric" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none">
-              <option value="revenue">Revenue (₹)</option>
-              <option value="units">Units Sold</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Product Search Bar & Selected Product Chips -->
-        <div class="space-y-2">
-          <div class="relative">
-            <input
-              type="text"
-              id="productSearchInput"
-              oninput="searchProductsDropdown()"
-              onfocus="searchProductsDropdown()"
-              placeholder="Search products in dataset to add to chart..."
-              class="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-slate-600"
-            />
-            <!-- Dropdown Results for Product Search -->
-            <div id="productSearchResults" class="hidden absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded shadow-sm max-h-48 overflow-y-auto z-30 divide-y divide-slate-100 text-xs"></div>
-          </div>
-
-          <!-- Active Selected Products Pills -->
-          <div id="selectedProductsChips" class="flex flex-wrap gap-1.5"></div>
-        </div>
-
-        <!-- Expanded Full-Width Chart.js Canvas (h-80 for larger visual clarity) -->
-        <div class="h-80 pt-1">
-          <canvas id="productTrendChart"></canvas>
-        </div>
-      </section>
-
-      <!-- ROW 3: CUSTOMER BEHAVIOR SEGMENTATION TABLE (6 Clean Columns) & CUSTOMER 360 INSPECTOR -->
+      <!-- ROW 2: FULL-WIDTH PRODUCT SALES TREND CHART + TOP PRODUCTS LEADERBOARD -->
       <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-        <!-- Customer Segmentation Table -->
+        <!-- Left (2 Columns): Multi-Product Year-wise & Month-wise Sales Analysis -->
+        <div class="panel p-4 lg:col-span-2 space-y-3">
+          <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2.5">
+            <div>
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Product Sales Analysis (Year-wise / Month-wise)</h2>
+              <p class="text-[11px] text-slate-500">Search or click any product in the leaderboard on the right to compare trends</p>
+            </div>
+
+            <div class="flex items-center space-x-2">
+              <select id="trendGranularity" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none">
+                <option value="month">Month-wise (YYYY-MM)</option>
+                <option value="year">Year-wise (YYYY)</option>
+              </select>
+              <select id="trendMetric" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none">
+                <option value="revenue">Revenue (₹)</option>
+                <option value="units">Units Sold</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Product Search Bar & Selected Product Chips -->
+          <div class="space-y-2">
+            <div class="relative">
+              <input
+                type="text"
+                id="productSearchInput"
+                oninput="searchProductsDropdown()"
+                onfocus="searchProductsDropdown()"
+                placeholder="Search products in dataset to add to chart..."
+                class="w-full bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-slate-600"
+              />
+              <div id="productSearchResults" class="hidden absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded shadow-sm max-h-48 overflow-y-auto z-30 divide-y divide-slate-100 text-xs"></div>
+            </div>
+            <div id="selectedProductsChips" class="flex flex-wrap gap-1.5"></div>
+          </div>
+
+          <div class="h-72 pt-1">
+            <canvas id="productTrendChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Right (1 Column): Top Products Performance Leaderboard (Click any row to plot on chart!) -->
+        <div class="panel p-4 flex flex-col">
+          <div class="border-b border-slate-200 pb-2.5 mb-2.5">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Top Products Leaderboard</h2>
+            <p class="text-[11px] text-slate-500">Click any product to add it to the trend chart</p>
+          </div>
+          <div class="flex-1 overflow-y-auto max-h-96">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead class="sticky top-0 bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[10px]">
+                <tr>
+                  <th class="py-2 px-2">Product</th>
+                  <th class="py-2 px-2 text-right">Units</th>
+                  <th class="py-2 px-2 text-right">Revenue</th>
+                  <th class="py-2 px-2 text-right">Share</th>
+                </tr>
+              </thead>
+              <tbody id="topProductsBody" class="divide-y divide-slate-200 text-slate-700"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ROW 3: CUSTOMER BEHAVIOR SEGMENTATION TABLE & REAL ORDER LEDGER INSPECTOR -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- Customer Segmentation Table (With 1-Click CSV Export) -->
         <div class="panel p-4 lg:col-span-2 flex flex-col">
           <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2.5 mb-3">
             <div>
               <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Customer Segmentation & Behavior Ledger</h2>
-              <p class="text-[11px] text-slate-500">RFM + K-Means Clustering • Click any customer row to view order details</p>
+              <p class="text-[11px] text-slate-500">RFM + Ranked K-Means Tiers • Click any customer row to inspect their orders</p>
             </div>
-            <input
-              type="text"
-              id="customerSearch"
-              oninput="filterCustomerTable()"
-              placeholder="Filter customer ID or segment..."
-              class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:bg-white"
-            />
+            <div class="flex items-center space-x-2">
+              <input
+                type="text"
+                id="customerSearch"
+                oninput="filterCustomerTable()"
+                placeholder="Filter customer or segment..."
+                class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:bg-white"
+              />
+              <button onclick="exportCustomerTableCsv()" class="px-2.5 py-1 rounded border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium text-xs transition">
+                Export CSV
+              </button>
+            </div>
           </div>
 
           <div class="max-h-96 overflow-y-auto">
@@ -180,8 +203,9 @@
               <thead class="sticky top-0 bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[11px]">
                 <tr>
                   <th class="py-2 px-2.5">Customer ID</th>
-                  <th class="py-2 px-2.5">Segment</th>
-                  <th class="py-2 px-2.5">Cluster</th>
+                  <th class="py-2 px-2.5">RFM Segment</th>
+                  <th class="py-2 px-2.5">K-Means Tier</th>
+                  <th class="py-2 px-2.5">Recency</th>
                   <th class="py-2 px-2.5">Orders</th>
                   <th class="py-2 px-2.5">Units</th>
                   <th class="py-2 px-2.5">Total Spend</th>
@@ -192,36 +216,64 @@
           </div>
         </div>
 
-        <!-- Customer 360 Detail Panel -->
-        <div class="panel p-4 flex flex-col justify-between space-y-4">
+        <!-- Customer Account Inspector (Now shows real Order & Product Purchase History instead of fake coupon text!) -->
+        <div class="panel p-4 flex flex-col justify-between space-y-3">
           <div>
-            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">Customer Account Inspector</h2>
-            <h3 id="c360Name" class="text-base font-bold text-slate-900 mt-3">Select a customer</h3>
-            <p id="c360Meta" class="text-xs text-slate-500 mt-0.5">Click a row in the table to inspect metrics</p>
+            <div class="flex justify-between items-center border-b border-slate-200 pb-2">
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Customer Account Inspector</h2>
+              <button onclick="eraseCustomerDpdp()" class="px-2 py-0.5 rounded border border-slate-300 hover:bg-rose-50 hover:text-rose-700 text-slate-600 text-[11px] font-medium transition" title="Delete customer record (DPDP Act)">
+                Delete Customer
+              </button>
+            </div>
+            <h3 id="c360Name" class="text-sm font-bold text-slate-900 mt-2.5">Select a customer</h3>
+            <p id="c360Meta" class="text-[11px] text-slate-500 mt-0.5">Click a row in the table to view order history</p>
 
-            <div class="mt-3 space-y-1.5" id="c360Shap"></div>
+            <div class="mt-2.5 grid grid-cols-2 gap-1.5" id="c360Shap"></div>
           </div>
 
-          <div class="pt-3 border-t border-slate-200 space-y-2">
-            <label class="text-[11px] font-semibold text-slate-600 uppercase">Outreach Note</label>
-            <textarea id="c360Message" rows="3" readonly class="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs text-slate-700 focus:outline-none"></textarea>
-            <div class="flex gap-2">
-              <button onclick="copyCampaign()" class="flex-1 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs transition">
-                Copy Note
-              </button>
-              <button onclick="eraseCustomerDpdp()" class="px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-100 text-slate-700 font-medium text-xs transition">
-                Delete Record
-              </button>
+          <!-- Customer's Individual Order & Product Purchase Ledger -->
+          <div class="pt-2 border-t border-slate-200 flex-1 flex flex-col">
+            <p class="text-[11px] font-semibold text-slate-600 uppercase mb-1.5">Recent Purchase Ledger</p>
+            <div class="max-h-48 overflow-y-auto border border-slate-200 rounded">
+              <table class="w-full text-left border-collapse text-[11px]">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500">
+                  <tr>
+                    <th class="py-1.5 px-2">Date</th>
+                    <th class="py-1.5 px-2">Product</th>
+                    <th class="py-1.5 px-2 text-right">Qty</th>
+                    <th class="py-1.5 px-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody id="c360OrderHistoryBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
+              </table>
             </div>
           </div>
         </div>
 
       </section>
 
-      <!-- ROW 4: DATASET FINDINGS & SUMMARY (Moved to the bottom in a horizontal 4-column grid) -->
+      <!-- ROW 4: RFM SEGMENT DISTRIBUTION MATRIX (Shopify-style Cohort & Revenue Share Breakdown Table) -->
       <section class="panel p-4">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200 pb-2">Dataset Findings & Summary</h2>
-        <div id="reviewsList" class="mt-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-xs text-slate-700 leading-relaxed"></div>
+        <div class="border-b border-slate-200 pb-2 mb-3">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">RFM Customer Segment Distribution & Revenue Breakdown</h2>
+          <p class="text-[11px] text-slate-500">Quantitative summary of customer concentration, recency, and revenue share across behavioral groups</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead class="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase text-[11px]">
+              <tr>
+                <th class="py-2 px-3">Behavior Segment</th>
+                <th class="py-2 px-3">Customers</th>
+                <th class="py-2 px-3">% of Customers</th>
+                <th class="py-2 px-3">Avg Days Since Last Order</th>
+                <th class="py-2 px-3">Total Orders</th>
+                <th class="py-2 px-3">Segment Revenue</th>
+                <th class="py-2 px-3">% Share of Revenue</th>
+              </tr>
+            </thead>
+            <tbody id="segmentMatrixBody" class="divide-y divide-slate-200 text-slate-700"></tbody>
+          </table>
+        </div>
       </section>
 
     </main>
@@ -229,20 +281,18 @@
 
   <!-- APPLICATION LOGIC -->
   <script>
-    // Track active dataset key, customer list, selected products for chart, and Chart.js instance
     let activeApiKey = localStorage.getItem("lastActiveDatasetKey") || "";
     let selectedCustomerId = "";
     let allCustomersCache = [];
     let selectedProducts = [];
     let productChartInstance = null;
 
-    // Opens or closes the left dataset list sidebar
+    // Toggles the collapsible left datasets sidebar
     function toggleSidebar() {
-      const sb = document.getElementById("datasetSidebar");
-      sb.classList.toggle("hidden");
+      document.getElementById("datasetSidebar").classList.toggle("hidden");
     }
 
-    // Hide the product search dropdown when clicking outside
+    // Closes the product search dropdown when clicking outside
     document.addEventListener("click", (e) => {
       const box = document.getElementById("productSearchResults");
       const inp = document.getElementById("productSearchInput");
@@ -251,7 +301,7 @@
       }
     });
 
-    // Loads all saved dataset files from SQLite and highlights the active dataset in the left sidebar
+    // Loads all saved dataset files into the left sidebar with a delete (×) button for each file
     async function refreshDatasetSidebar(preferredKey = null) {
       try {
         const res = await fetch("/api/stores");
@@ -270,25 +320,42 @@
         const listEl = document.getElementById("sidebarFileList");
         listEl.innerHTML = stores.map(s => {
           const isActive = s.api_key === activeApiKey;
-          const activeClass = isActive
+          const rowClass = isActive
             ? "bg-slate-900 text-white font-semibold"
             : "text-slate-700 hover:bg-slate-100 font-normal";
           return `
-            <button
-              onclick="switchDataset('${s.api_key}')"
-              class="w-full text-left px-2.5 py-2 rounded text-xs truncate transition ${activeClass}"
-              title="${s.store_name}"
-            >
-              ${s.store_name}
-            </button>
+            <div class="flex items-center justify-between rounded px-2 py-1.5 transition ${rowClass}">
+              <button
+                onclick="switchDataset('${s.api_key}')"
+                class="flex-1 text-left text-xs truncate"
+                title="${s.store_name}"
+              >
+                ${s.store_name}
+              </button>
+              <button
+                onclick="deleteDataset('${s.tenant_id}', event)"
+                class="ml-2 text-xs opacity-60 hover:opacity-100 px-1"
+                title="Remove dataset"
+              >
+                ×
+              </button>
+            </div>
           `;
         }).join("");
-      } catch (e) {
-        // Retry handled by loadStoreData
-      }
+      } catch (e) {}
     }
 
-    // Switches the active dataset when the user clicks a file in the left sidebar
+    // Deletes an uploaded dataset from the database when clicking '×' in the left sidebar
+    async function deleteDataset(tenantId, event) {
+      event.stopPropagation();
+      if (!confirm("Remove this dataset from the workspace?")) return;
+      await fetch(`/api/stores/${encodeURIComponent(tenantId)}`, { method: "DELETE" });
+      activeApiKey = "";
+      await refreshDatasetSidebar();
+      await loadStoreData(0);
+    }
+
+    // Switches active dataset when clicking a filename in the left sidebar
     function switchDataset(apiKey) {
       activeApiKey = apiKey;
       localStorage.setItem("lastActiveDatasetKey", apiKey);
@@ -297,7 +364,7 @@
       loadStoreData(0);
     }
 
-    // Fetches KPIs, Best/Worst customers, and customer segments for the active dataset
+    // Loads KPIs, Top Products Leaderboard, Customer Ledger, and RFM Segment Matrix
     async function loadStoreData(retryCount = 0) {
       try {
         if (!activeApiKey) await refreshDatasetSidebar();
@@ -307,7 +374,9 @@
 
         document.getElementById("activeFileName").innerText = data.store_name;
         document.getElementById("kpiRevenue").innerText = "₹" + (data.kpis.total_revenue || 0).toLocaleString("en-IN");
+        document.getElementById("kpiOrdersSub").innerText = `${(data.kpis.total_orders || 0).toLocaleString("en-IN")} verified orders`;
         document.getElementById("kpiCustomers").innerText = (data.kpis.total_customers || 0).toLocaleString("en-IN");
+        document.getElementById("kpiRepeatRate").innerText = `${data.kpis.repeat_rate_pct || 0}% repeat buyer rate`;
         document.getElementById("kpiAvgSpend").innerText = "₹" + (data.kpis.avg_spend || 0).toLocaleString("en-IN");
 
         const best = data.kpis.best_customer || { id: "N/A", spend: 0, units: 0 };
@@ -318,9 +387,31 @@
         document.getElementById("kpiWorstId").innerText = worst.id;
         document.getElementById("kpiWorstMeta").innerText = `₹${(worst.spend || 0).toLocaleString("en-IN")} • ${(worst.units || 0).toLocaleString("en-IN")} units`;
 
-        document.getElementById("reviewsList").innerHTML = (data.store_reviews || []).map(r =>
-          `<div class="p-3 rounded bg-slate-50 border border-slate-200">${r.replace(/\*\*(.*?)\*\*/g, '<strong class="text-slate-900">$1</strong>')}</div>`
-        ).join("");
+        // Populate Top Products Leaderboard (clicking any product plots it on the trend chart)
+        document.getElementById("topProductsBody").innerHTML = (data.top_products || []).map(p => {
+          const safeName = String(p.Product).replace(/'/g, "\\'");
+          return `
+            <tr onclick="addProductToChart('${safeName}')" class="hover:bg-slate-50 cursor-pointer" title="Click to plot on trend chart">
+              <td class="py-2 px-2 font-medium text-slate-900 truncate max-w-[140px]">${p.Product}</td>
+              <td class="py-2 px-2 text-right">${p.Units_Sold.toLocaleString("en-IN")}</td>
+              <td class="py-2 px-2 text-right font-medium">₹${p.Revenue.toLocaleString("en-IN")}</td>
+              <td class="py-2 px-2 text-right text-slate-500">${p["Revenue_Share_%"]}%</td>
+            </tr>
+          `;
+        }).join("");
+
+        // Populate bottom RFM Segment Distribution Matrix
+        document.getElementById("segmentMatrixBody").innerHTML = (data.segment_summary || []).map(s => `
+          <tr>
+            <td class="py-2 px-3 font-semibold text-slate-900">${s.Segment}</td>
+            <td class="py-2 px-3">${s.Customers.toLocaleString("en-IN")}</td>
+            <td class="py-2 px-3">${s["Customer_Share_%"]}%</td>
+            <td class="py-2 px-3">${s.Avg_Recency_Days} days</td>
+            <td class="py-2 px-3">${s.Total_Orders.toLocaleString("en-IN")}</td>
+            <td class="py-2 px-3 font-medium text-slate-900">₹${s.Total_Revenue.toLocaleString("en-IN")}</td>
+            <td class="py-2 px-3 font-semibold">${s["Revenue_Share_%"]}%</td>
+          </tr>
+        `).join("");
 
         allCustomersCache = data.customer_behavior || [];
         renderCustomerRows(allCustomersCache);
@@ -338,7 +429,7 @@
       }
     }
 
-    // Searches products in the active dataset and displays a dropdown to add products to the chart
+    // Searches products in the active dataset for the multi-product chart selector
     async function searchProductsDropdown() {
       const q = document.getElementById("productSearchInput").value;
       const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`, {
@@ -365,7 +456,7 @@
       box.classList.remove("hidden");
     }
 
-    // Adds a product to the multi-product comparison list and refreshes the trend chart
+    // Adds a product to the comparison chart
     function addProductToChart(productName) {
       if (!selectedProducts.includes(productName)) {
         selectedProducts.push(productName);
@@ -375,13 +466,13 @@
       loadProductTrends();
     }
 
-    // Removes a product chip from the multi-product trend chart
+    // Removes a product chip from the comparison chart
     function removeProductFromChart(productName) {
       selectedProducts = selectedProducts.filter(p => p !== productName);
       loadProductTrends();
     }
 
-    // Fetches and renders Year-wise or Month-wise sales trends for the selected product(s)
+    // Renders the Year-wise or Month-wise Product Sales Trend Chart
     async function loadProductTrends() {
       const granularity = document.getElementById("trendGranularity").value;
       const metric = document.getElementById("trendMetric").value;
@@ -436,13 +527,14 @@
       });
     }
 
-    // Renders high-density customer rows with the 6 core columns (Churn Risk & Action removed)
+    // Renders customer rows with Ranked K-Means Tiers and Recency days
     function renderCustomerRows(customers) {
       document.getElementById("customerTableBody").innerHTML = customers.map(c => `
         <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-50 cursor-pointer">
           <td class="py-2 px-2.5 font-semibold text-slate-900">${c.CustomerID}</td>
           <td class="py-2 px-2.5">${c.Segment}</td>
-          <td class="py-2 px-2.5 text-slate-500">${c.KMeans_ML_Cluster || 'Cluster 0'}</td>
+          <td class="py-2 px-2.5 text-slate-600">${c.KMeans_ML_Cluster}</td>
+          <td class="py-2 px-2.5 text-slate-500">${c.Recency_Days}d ago</td>
           <td class="py-2 px-2.5">${c.Orders}</td>
           <td class="py-2 px-2.5">${(c.Total_Products || c.Orders).toLocaleString("en-IN")}</td>
           <td class="py-2 px-2.5 font-medium text-slate-900">₹${c.Total_Spent.toLocaleString("en-IN")}</td>
@@ -450,17 +542,34 @@
       `).join("");
     }
 
-    // Filters customer table rows by customer ID or segment name
+    // Filters customer table rows by Customer ID, Segment, or K-Means Tier
     function filterCustomerTable() {
       const q = document.getElementById("customerSearch").value.toLowerCase();
       const filtered = allCustomersCache.filter(c =>
         String(c.CustomerID).toLowerCase().includes(q) ||
-        String(c.Segment).toLowerCase().includes(q)
+        String(c.Segment).toLowerCase().includes(q) ||
+        String(c.KMeans_ML_Cluster).toLowerCase().includes(q)
       );
       renderCustomerRows(filtered);
     }
 
-    // Loads individual customer metrics and order ledger into the right-hand inspector panel
+    // Exports the currently displayed customer segmentation table as a downloadable CSV file
+    function exportCustomerTableCsv() {
+      if (!allCustomersCache.length) return;
+      const headers = ["CustomerID", "Segment", "KMeans_Tier", "Recency_Days", "Orders", "Units", "Total_Spent"];
+      const rows = allCustomersCache.map(c =>
+        [c.CustomerID, `"${c.Segment}"`, `"${c.KMeans_ML_Cluster}"`, c.Recency_Days, c.Orders, c.Total_Products, c.Total_Spent].join(",")
+      );
+      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+      const link = document.createElement("a");
+      link.setAttribute("href", encodeURI(csvContent));
+      link.setAttribute("download", "customer_segmentation_export.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Populates the right-hand Customer Account Inspector with verified metrics and real order history
     async function inspectCustomer(customerId) {
       selectedCustomerId = customerId;
       const res = await fetch(`/api/customer-360/${encodeURIComponent(customerId)}`, {
@@ -469,19 +578,27 @@
       if (!res.ok) return;
       const c360 = await res.json();
 
-      document.getElementById("c360Name").innerText = `${c360.customer_id} (₹${c360.total_spent.toLocaleString("en-IN")})`;
-      document.getElementById("c360Meta").innerText = `${c360.orders_count} Orders • Last Order: ${c360.last_order_date}`;
-      document.getElementById("c360Message").value = c360.ready_to_send_message;
+      document.getElementById("c360Name").innerText = `${c360.customer_id} — ₹${c360.total_spent.toLocaleString("en-IN")}`;
+      document.getElementById("c360Meta").innerText = `${c360.orders_count} Orders • Last Active: ${c360.last_order_date}`;
 
       document.getElementById("c360Shap").innerHTML = c360.shap_explanations.map(s => `
-        <div class="p-2 rounded bg-slate-50 border border-slate-200 flex justify-between text-xs">
-          <span class="text-slate-500">${s.Feature}</span>
-          <span class="font-semibold text-slate-800">${s.Impact}</span>
+        <div class="p-2 rounded bg-slate-50 border border-slate-200 text-[11px]">
+          <p class="text-slate-400 uppercase font-medium">${s.Feature}</p>
+          <p class="font-semibold text-slate-800 mt-0.5">${s.Impact}</p>
         </div>
+      `).join("");
+
+      document.getElementById("c360OrderHistoryBody").innerHTML = (c360.order_history || []).map(o => `
+        <tr>
+          <td class="py-1.5 px-2 text-slate-500">${o.InvoiceDate}</td>
+          <td class="py-1.5 px-2 font-medium text-slate-800 truncate max-w-[120px]" title="${o.Product}">${o.Product}</td>
+          <td class="py-1.5 px-2 text-right">${o.Quantity}</td>
+          <td class="py-1.5 px-2 text-right font-medium">₹${(o.TotalPrice || 0).toLocaleString("en-IN")}</td>
+        </tr>
       `).join("");
     }
 
-    // Slices massive files (270MB+ / 1M+ rows) on disk so the dataset loads in <2 seconds with zero browser lag
+    // Slices large files on disk and uploads via same-origin gateway for instant <2s processing
     async function uploadUniversalCsv(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -532,7 +649,7 @@
       }
     }
 
-    // Deletes a customer record under DPDP compliance
+    // Deletes a customer record under DPDP Act compliance
     async function eraseCustomerDpdp() {
       if (!selectedCustomerId) return;
       if (!confirm(`Delete all records for customer "${selectedCustomerId}"?`)) return;
@@ -543,14 +660,6 @@
       loadStoreData(0);
     }
 
-    // Copies the customer outreach note to clipboard
-    function copyCampaign() {
-      const msg = document.getElementById("c360Message");
-      msg.select();
-      navigator.clipboard.writeText(msg.value);
-    }
-
-    // Load saved datasets into the left sidebar and display the most recent dataset on startup
     window.onload = () => refreshDatasetSidebar().then(() => loadStoreData(0));
   </script>
 </body>
