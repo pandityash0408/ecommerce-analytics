@@ -314,6 +314,7 @@ def search_products(q: str = "", store: dict = Security(verify_api_key)):
 
 
 # Returns Year-wise (YYYY) or Month-wise (YYYY-MM) sales trends for one or multiple selected products
+# Returns Year-wise (YYYY) or Month-wise (YYYY-MM) sales trends for one or multiple selected products
 @app.get("/products/trends")
 def get_product_trends(
     granularity: str = "month",
@@ -323,8 +324,16 @@ def get_product_trends(
   tenant_id = store["tenant_id"]
   date_len = 4 if granularity == "year" else 7
 
+  # Split any comma-separated product strings back into distinct product names
+  clean_products = []
+  for p in products:
+    for item in p.split(","):
+      if item.strip() and item.strip() not in clean_products:
+        clean_products.append(item.strip())
+  products = clean_products
+
   conn = sqlite3.connect(DB_PATH, timeout=60)
-  # If no products are passed yet, automatically pick the top 3 products by revenue
+  # If no products are selected, automatically pick the top 3 products by revenue
   if not products:
     top_df = pd.read_sql_query(
         "SELECT Product FROM sales WHERE tenant_id = ? GROUP BY Product ORDER BY SUM(Quantity * UnitPrice) DESC LIMIT 3",
