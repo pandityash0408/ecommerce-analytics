@@ -109,6 +109,19 @@ app.post("/api/etl-chunk", async (req, res) => {
   }
 });
 
+// Deletes a saved dataset from the sidebar when the user clicks the delete button
+app.delete("/api/stores/:tenantId", async (req, res) => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/stores/${encodeURIComponent(req.params.tenantId)}`, {
+      method: "DELETE",
+    });
+    res.status(response.status).json(await response.json());
+  } catch (err) {
+    res.status(500).json({ detail: err.message });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`Enterprise Analytics Dashboard running on http://localhost:${PORT}`);
 });
