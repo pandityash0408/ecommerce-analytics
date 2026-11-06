@@ -46,7 +46,7 @@ API_KEYS = {
 }
 
 
-# Validates X-API-Key against registered datasets in SQLite or falls back to the most recent dataset
+# Validates X-API-Key against registered datasets in SQLite
 def verify_api_key(api_key: str = Security(api_key_header)):
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
@@ -63,7 +63,7 @@ def verify_api_key(api_key: str = Security(api_key_header)):
   raise HTTPException(status_code=401, detail="Guard #1 (API Key): Invalid or missing X-API-Key!")
 
 
-# Returns all uploaded datasets ordered from newest to oldest so the latest dataset loads automatically
+# Returns all uploaded datasets ordered from newest to oldest
 @app.get("/stores")
 def list_all_stores():
   conn = sqlite3.connect(DB_PATH, timeout=60)
@@ -73,6 +73,19 @@ def list_all_stores():
   )
   conn.close()
   return {"stores": df.to_dict(orient="records")}
+
+
+# Deletes an uploaded dataset and all of its sales rows when the user clicks 'x' in the left sidebar
+@app.delete("/stores/{tenant_id}")
+def delete_store_dataset(tenant_id: str):
+  tenant_id = sanitize_identifier(tenant_id, "tenant_id")
+  conn = sqlite3.connect(DB_PATH, timeout=60)
+  cur = conn.cursor()
+  cur.execute("DELETE FROM sales WHERE tenant_id = ?", (tenant_id,))
+  cur.execute("DELETE FROM stores WHERE tenant_id = ?", (tenant_id,))
+  conn.commit()
+  conn.close()
+  return {"status": "deleted", "tenant_id": tenant_id}
 
 
 # Guard #2: HTTP Basic Authentication configuration
@@ -111,7 +124,7 @@ OAUTH_CLIENTS = {
 }
 
 
-# Computes RFM and total products dealt with for the top 200 customers in SQL
+# Computes RFM and total products dealt with for the top 300 customers in SQL
 def calculate_rfm_for_tenant(tenant_id: str):
   conn = sqlite3.connect(DB_PATH, timeout=60)
   query = """
@@ -125,7 +138,7 @@ def calculate_rfm_for_tenant(tenant_id: str):
         WHERE tenant_id = ?
         GROUP BY CustomerID
         ORDER BY Monetary DESC, TotalProducts DESC
-        LIMIT 200
+        LIMIT 300
     """
   rfm = pd.read_sql_query(query, conn, params=(tenant_id,))
   conn.close()
@@ -141,7 +154,7 @@ def calculate_rfm_for_tenant(tenant_id: str):
   return rfm[["CustomerID", "Recency", "Frequency", "TotalProducts", "Monetary"]].to_dict(orient="records")
 
 
-# Returns dataset KPIs including Best Customer, Worst Customer, K-Means segments, and executive reviews
+# Returns enterprise KPIs, Repeat Buyer Rate, Ranked K-Means Tiers, RFM Segment Matrix, and Top Products Leaderboard
 @app.get("/store-insights")
 def get_store_insights(store: dict = Security(verify_api_key)):
   tenant_id = store["tenant_id"]
@@ -150,14 +163,22 @@ def get_store_insights(store: dict = Security(verify_api_key)):
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
 
-  # 1. Query overall dataset revenue and customer count
+  # 1. Query overall dataset revenue, customer count, and total orders
   cur.execute(
-      "SELECT COALESCE(ROUND(SUM(Quantity * UnitPrice), 2), 0), COUNT(DISTINCT CustomerID) FROM sales WHERE tenant_id = ?",
+      "SELECT COALESCE(ROUND(SUM(Quantity * UnitPrice), 2), 0), COUNT(DISTINCT CustomerID), COUNT(DISTINCT InvoiceNo) FROM sales WHERE tenant_id = ?",
       (tenant_id,),
   )
-  total_revenue, total_customers = cur.fetchone()
+  total_revenue, total_customers, total_orders = cur.fetchone()
 
-  # 2. Query Best Customer (highest spend + most products dealt with)
+  # 2. Query Repeat Customer Rate (% of customers with > 1 order)
+  cur.execute(
+      "SELECT COUNT(*) FROM (SELECT CustomerID FROM sales WHERE tenant_id = ? GROUP BY CustomerID HAVING COUNT(DISTINCT InvoiceNo) > 1)",
+      (tenant_id,),
+  )
+  repeat_customers = cur.fetchone()[0]
+  repeat_rate_pct = round((repeat_customers / total_customers) * 100, 1) if total_customers else 0.0
+
+  # 3. Query Best Customer (highest spend + most products dealt with)
   cur.execute(
       """
       SELECT CustomerID, ROUND(SUM(Quantity * UnitPrice), 2) AS Spend, SUM(Quantity) AS Units
@@ -174,7 +195,7 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       else {"id": "N/A", "spend": 0, "units": 0}
   )
 
-  # 3. Query Worst Customer (lowest spend + fewest products dealt with)
+  # 4. Query Worst Customer (lowest spend + fewest products dealt with)
   cur.execute(
       """
       SELECT CustomerID, ROUND(SUM(Quantity * UnitPrice), 2) AS Spend, SUM(Quantity) AS Units
@@ -190,78 +211,109 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       if worst_row
       else {"id": "N/A", "spend": 0, "units": 0}
   )
+
+  # 5. Query Top 10 Products Leaderboard by Revenue & Units
+  top_products_df = pd.read_sql_query(
+      """
+      SELECT
+          Product,
+          SUM(Quantity) AS Units_Sold,
+          COUNT(DISTINCT CustomerID) AS Unique_Buyers,
+          ROUND(SUM(Quantity * UnitPrice), 2) AS Revenue
+      FROM sales
+      WHERE tenant_id = ?
+      GROUP BY Product
+      ORDER BY Revenue DESC
+      LIMIT 10
+      """,
+      conn,
+      params=(tenant_id,),
+  )
   conn.close()
+
+  top_products = []
+  for _, prow in top_products_df.iterrows():
+    share = round(( float(prow["Revenue"]) / total_revenue ) * 100, 1) if total_revenue else 0.0
+    top_products.append({
+        "Product": prow["Product"],
+        "Units_Sold": int(prow["Units_Sold"]),
+        "Unique_Buyers": int(prow["Unique_Buyers"]),
+        "Revenue": float(prow["Revenue"]),
+        "Revenue_Share_%": share,
+    })
 
   avg_spend = round(total_revenue / total_customers, 2) if total_customers else 0
   customers = calculate_rfm_for_tenant(tenant_id)
 
-  # Run Scikit-Learn K-Means clustering on customer Recency, Frequency, and Monetary features
+  # Run Scikit-Learn K-Means and rank clusters by average spend into Tier 1 (High), Tier 2 (Core), Tier 3 (Low)
   rfm_df = pd.DataFrame(customers)
   if len(rfm_df) >= 3:
     scaler = StandardScaler()
     scaled_features = scaler.fit_transform(rfm_df[["Recency", "Frequency", "Monetary"]])
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
-    rfm_df["KMeans_Cluster"] = [f"Cluster {c}" for c in kmeans.fit_predict(scaled_features)]
+    raw_clusters = kmeans.fit_predict(scaled_features)
+    rfm_df["raw_c"] = raw_clusters
+    cluster_means = rfm_df.groupby("raw_c")["Monetary"].mean().sort_values(ascending=False).index.tolist()
+    tier_labels = {
+        cluster_means[0]: "Tier 1: High-Value",
+        cluster_means[1]: "Tier 2: Core Regular",
+        cluster_means[2]: "Tier 3: Low-Volume",
+    }
+    rfm_df["KMeans_Cluster"] = [tier_labels.get(c, "Tier 2: Core Regular") for c in raw_clusters]
   elif not rfm_df.empty:
-    rfm_df["KMeans_Cluster"] = "Cluster 0"
+    rfm_df["KMeans_Cluster"] = "Tier 1: High-Value"
 
   kmeans_map = dict(zip(rfm_df["CustomerID"], rfm_df["KMeans_Cluster"])) if not rfm_df.empty else {}
 
   enriched_customers = []
-  at_risk = []
+  segment_stats = {}
 
   for c in customers:
     r, f, m = c["Recency"], c["Frequency"], c["Monetary"]
     units = int(c.get("TotalProducts", f))
-    avg_order_value = round(m / f, 2) if f > 0 else m
 
-    if r <= 7 and (f >= 2 or m >= 1000):
-      segment = "Champion (VIP)"
-      behavior_review = "High-frequency buyer with recent activity and strong spend."
-      retailer_action = "Provide priority account tier and early product access."
-      churn_prob = 5
-    elif r <= 20:
-      segment = "Loyal Regular"
-      behavior_review = "Consistent repeat buyer with stable order volume."
-      retailer_action = "Introduce volume tier discounts to increase order size."
-      churn_prob = 18
+    if r <= 14 and (f >= 3 or m >= avg_spend * 1.5):
+      segment = "Champions (VIP)"
+    elif r <= 45 and f >= 2:
+      segment = "Loyal Customers"
     elif r <= 90:
-      segment = "At-Risk (Slipping)"
-      behavior_review = f"No purchase recorded for {r} days; engagement declining."
-      retailer_action = "Send targeted 15% retention incentive within 48 hours."
-      churn_prob = 65
-      at_risk.append(c["CustomerID"])
+      segment = "At-Risk / Slipping"
     else:
-      segment = "Lost / Inactive"
-      behavior_review = f"Inactive for {r} days; high probability of churn."
-      retailer_action = "Trigger win-back campaign or account check-in survey."
-      churn_prob = 88
-      at_risk.append(c["CustomerID"])
+      segment = "Hibernating / Inactive"
 
-    retention_factor = max(0.2, (100 - churn_prob) / 100)
-    predicted_clv_6m = round(m * retention_factor * 1.4, 2)
+    if segment not in segment_stats:
+      segment_stats[segment] = {"count": 0, "recency_sum": 0, "orders": 0, "revenue": 0.0}
+    segment_stats[segment]["count"] += 1
+    segment_stats[segment]["recency_sum"] += r
+    segment_stats[segment]["orders"] += f
+    segment_stats[segment]["revenue"] += m
 
     enriched_customers.append({
         "CustomerID": c["CustomerID"],
         "Segment": segment,
-        "KMeans_ML_Cluster": kmeans_map.get(c["CustomerID"], "Cluster 0"),
+        "KMeans_ML_Cluster": kmeans_map.get(c["CustomerID"], "Tier 2: Core Regular"),
         "Recency_Days": r,
         "Orders": f,
         "Total_Products": units,
         "Total_Spent": m,
-        "Avg_Order_Value": avg_order_value,
-        "Churn_Risk_%": churn_prob,
-        "Predicted_6M_CLV": predicted_clv_6m,
-        "Behavior_Understanding": behavior_review,
-        "Recommended_Retailer_Action": retailer_action,
     })
 
-  store_reviews = [
-      f"**Revenue Summary:** Dataset **{store_name}** recorded **₹{total_revenue:,.2f}** across **{total_customers:,} customers** (Average spend: **₹{avg_spend:,.2f}**).",
-      f"**Best Customer Performance:** **{best_customer['id']}** leads with **₹{best_customer['spend']:,.2f}** total spend across **{best_customer['units']:,} units**.",
-      f"**Lowest Customer Activity:** **{worst_customer['id']}** recorded the lowest activity with **₹{worst_customer['spend']:,.2f}** across **{worst_customer['units']:,} unit(s)**.",
-      f"**Retention Risk:** **{len(at_risk)} customer(s)** in the top cohort show elevated churn risk and require follow-up.",
-  ]
+  # Build Shopify-style RFM Segment Distribution Summary Matrix
+  sample_total_cust = len(enriched_customers) or 1
+  sample_total_rev = sum(c["Total_Spent"] for c in enriched_customers) or 1.0
+  segment_summary = []
+  for seg_name in ["Champions (VIP)", "Loyal Customers", "At-Risk / Slipping", "Hibernating / Inactive"]:
+    st = segment_stats.get(seg_name, {"count": 0, "recency_sum": 0, "orders": 0, "revenue": 0.0})
+    cnt = st["count"]
+    segment_summary.append({
+        "Segment": seg_name,
+        "Customers": cnt,
+        "Customer_Share_%": round((cnt / sample_total_cust) * 100, 1),
+        "Avg_Recency_Days": round(st["recency_sum"] / cnt, 1) if cnt else 0,
+        "Total_Orders": st["orders"],
+        "Total_Revenue": round(st["revenue"], 2),
+        "Revenue_Share_%": round((st["revenue"] / sample_total_rev) * 100, 1),
+    })
 
   return {
       "store_name": store_name,
@@ -269,16 +321,18 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       "kpis": {
           "total_revenue": total_revenue,
           "total_customers": total_customers,
+          "total_orders": total_orders,
+          "repeat_rate_pct": repeat_rate_pct,
           "avg_spend": avg_spend,
           "best_customer": best_customer,
           "worst_customer": worst_customer,
       },
-      "store_reviews": store_reviews,
-      "customer_behavior": enriched_customers[:100],
+      "segment_summary": segment_summary,
+      "top_products": top_products,
+      "customer_behavior": enriched_customers[:150],
   }
 
 
-# Searches distinct products in the active dataset by keyword and returns top matching products
 @app.get("/products/search")
 def search_products(q: str = "", store: dict = Security(verify_api_key)):
   tenant_id = store["tenant_id"]
@@ -313,8 +367,6 @@ def search_products(q: str = "", store: dict = Security(verify_api_key)):
   return {"products": df.to_dict(orient="records")}
 
 
-# Returns Year-wise (YYYY) or Month-wise (YYYY-MM) sales trends for one or multiple selected products
-# Returns Year-wise (YYYY) or Month-wise (YYYY-MM) sales trends for one or multiple selected products
 @app.get("/products/trends")
 def get_product_trends(
     granularity: str = "month",
@@ -324,7 +376,6 @@ def get_product_trends(
   tenant_id = store["tenant_id"]
   date_len = 4 if granularity == "year" else 7
 
-  # Split any comma-separated product strings back into distinct product names
   clean_products = []
   for p in products:
     for item in p.split(","):
@@ -333,7 +384,6 @@ def get_product_trends(
   products = clean_products
 
   conn = sqlite3.connect(DB_PATH, timeout=60)
-  # If no products are selected, automatically pick the top 3 products by revenue
   if not products:
     top_df = pd.read_sql_query(
         "SELECT Product FROM sales WHERE tenant_id = ? GROUP BY Product ORDER BY SUM(Quantity * UnitPrice) DESC LIMIT 3",
@@ -486,7 +536,7 @@ def get_customer_360(customer_id: str, store: dict = Security(verify_api_key)):
   conn = sqlite3.connect(DB_PATH, timeout=60)
   df = pd.read_sql_query(
       "SELECT InvoiceNo, InvoiceDate, Product, Quantity, UnitPrice, ROUND(Quantity * UnitPrice, 2) AS TotalPrice "
-      "FROM sales WHERE tenant_id = ? AND CustomerID = ? ORDER BY InvoiceDate DESC LIMIT 50",
+      "FROM sales WHERE tenant_id = ? AND CustomerID = ? ORDER BY InvoiceDate DESC LIMIT 25",
       conn,
       params=(tenant_id, customer_id),
   )
@@ -495,13 +545,14 @@ def get_customer_360(customer_id: str, store: dict = Security(verify_api_key)):
     raise HTTPException(status_code=404, detail="Customer not found.")
   total_spent = float(df["TotalPrice"].sum())
   orders_count = int(df["InvoiceNo"].nunique())
+  total_units = int(df["Quantity"].sum())
   last_date = str(df["InvoiceDate"].max())
   shap_drivers = [
       {"Feature": "Last Purchase Date", "Impact": last_date},
       {"Feature": "Distinct Orders", "Impact": f"{orders_count} orders"},
-      {"Feature": "Sampled Spend", "Impact": f"₹{total_spent:,.2f}"},
+      {"Feature": "Total Units Purchased", "Impact": f"{total_units:,} units"},
+      {"Feature": "Total Verified Spend", "Impact": f"₹{total_spent:,.2f}"},
   ]
-  campaign_msg = f"Dear {customer_id}, thank you for your business with {store['store_name']}. Use code PARTNER15 for a 15% discount on your next order."
   return {
       "customer_id": customer_id,
       "store_name": store["store_name"],
@@ -509,7 +560,6 @@ def get_customer_360(customer_id: str, store: dict = Security(verify_api_key)):
       "orders_count": orders_count,
       "last_order_date": last_date,
       "shap_explanations": shap_drivers,
-      "ready_to_send_message": campaign_msg,
       "order_history": df.to_dict(orient="records"),
   }
 
