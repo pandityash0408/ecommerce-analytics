@@ -39,6 +39,15 @@ COLUMN_SYNONYMS = {
         "unitprice", "unit_price", "unit price", "price", "amount", "total",
         "total_amount", "sales", "revenue", "value", "mrp", "cost", "rate",
     ],
+    # Direct profit column synonyms if the CSV already contains profit
+    "DirectProfit": [
+        "profit", "net_profit", "net profit", "gross_profit", "margin", "earnings", "gain",
+    ],
+    # Making cost / COGS column synonyms to derive Profit = Revenue - Cost
+    "MakingCost": [
+        "making_cost", "making cost", "unit_cost", "unit cost", "cogs",
+        "cost_price", "cost price", "buying_price", "wholesale_price", "manufacturing_cost", "expense",
+    ],
 }
 
 
@@ -86,6 +95,10 @@ def auto_map_columns(df: pd.DataFrame):
       elif target_col == "UnitPrice":
         num_cols = df.select_dtypes(include=["number"]).columns.tolist()
         df["UnitPrice"] = df[num_cols[-1]] if num_cols else 100.0
+      elif target_col in ("DirectProfit", "MakingCost"):
+        # Set to None when the uploaded dataset does not contain a profit or cost column
+        df[target_col] = None
+        detected_mapping[target_col] = "Not present in dataset"
 
   return df, detected_mapping
 
@@ -117,6 +130,23 @@ def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
 
   clean_chunk["tenant_id"] = tenant_id
   clean_chunk["CustomerID"] = clean_chunk["CustomerID"].astype(str).str.replace(".0", "", regex=False)
+
+  # Derive Profit: (1) use DirectProfit if present, (2) else compute Revenue - MakingCost, (3) else keep None (NULL)
+  revenue_series = clean_chunk["Quantity"] * clean_chunk["UnitPrice"]
+  if clean_chunk["DirectProfit"].notna().any():
+    clean_chunk["Profit"] = pd.to_numeric(
+        clean_chunk["DirectProfit"].astype(str).str.replace(r"[₹$,]", "", regex=True),
+        errors="coerce",
+    ).round(2)
+  elif clean_chunk["MakingCost"].notna().any():
+    unit_cost = pd.to_numeric(
+        clean_chunk["MakingCost"].astype(str).str.replace(r"[₹$,]", "", regex=True),
+        errors="coerce",
+    )
+    clean_chunk["Profit"] = (revenue_series - (clean_chunk["Quantity"] * unit_cost)).round(2)
+  else:
+    clean_chunk["Profit"] = None
+  
   return clean_chunk, schema_mapping
 
 
@@ -171,7 +201,8 @@ def _background_ingest_remaining_chunks(temp_path: str, filename: str, tenant_id
     for chunk in chunk_gen:
       clean_chunk, _ = clean_chunk_fast(chunk, tenant_id)
       if not clean_chunk.empty:
-        db_cols = clean_chunk[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice"]]
+        # Include the derived or nullable Profit column when inserting into SQLite
+        db_cols = clean_chunk[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit"]]
         db_cols.to_sql("sales", conn, if_exists="append", index=False, chunksize=10000)
         conn.commit()
 
