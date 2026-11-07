@@ -32,7 +32,7 @@ def init_db():
   except sqlite3.OperationalError:
     pass
 
-  # Create the sales table with a nullable Profit column (NULL when dataset lacks profit/cost data)
+  # Create the sales table with nullable Profit and Location columns
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,19 +43,24 @@ def init_db():
             Product TEXT DEFAULT 'General Item',
             Quantity INTEGER NOT NULL,
             UnitPrice REAL NOT NULL,
-            Profit REAL DEFAULT NULL
+            Profit REAL DEFAULT NULL,
+            Location TEXT DEFAULT NULL
         )
     """)
 
-  # Safely migrate existing databases by adding Product and nullable Profit columns
+  # Safely migrate existing databases by adding Product, Profit, and Location columns
   for col_sql in [
       "ALTER TABLE sales ADD COLUMN Product TEXT DEFAULT 'General Item';",
       "ALTER TABLE sales ADD COLUMN Profit REAL DEFAULT NULL;",
+      "ALTER TABLE sales ADD COLUMN Location TEXT DEFAULT NULL;",
   ]:
     try:
       cursor.execute(col_sql)
     except sqlite3.OperationalError:
       pass
+
+  # Create index for fast geographic queries
+  cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_loc ON sales(tenant_id, Location);")
 
   # Create composite indexes on tenant_id, CustomerID, and Product for fast search and grouping
   cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_tenant ON sales(tenant_id, CustomerID);")
