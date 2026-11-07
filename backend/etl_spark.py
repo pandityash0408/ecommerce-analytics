@@ -104,11 +104,12 @@ def auto_map_columns(df: pd.DataFrame):
 
 
 # Cleans a single DataFrame chunk using fast vectorized C-string operations
+# Cleans a single DataFrame chunk and derives Profit from DirectProfit or MakingCost
 def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
   chunk.columns = [str(c).strip() for c in chunk.columns]
   mapped_chunk, schema_mapping = auto_map_columns(chunk)
 
-  # Fast numeric conversion (only run regex if column is text/object type)
+  # Convert Quantity and UnitPrice to numeric values cleanly
   mapped_chunk["Quantity"] = pd.to_numeric(mapped_chunk["Quantity"], errors="coerce")
   if mapped_chunk["UnitPrice"].dtype == object:
     mapped_chunk["UnitPrice"] = pd.to_numeric(
@@ -128,17 +129,14 @@ def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
       (clean_chunk["Quantity"] > 0) & (clean_chunk["UnitPrice"] > 0)
   ].copy()
 
-  clean_chunk["tenant_id"] = tenant_id
-  clean_chunk["CustomerID"] = clean_chunk["CustomerID"].astype(str).str.replace(".0", "", regex=False)
-
-  # Derive Profit: (1) use DirectProfit if present, (2) else compute Revenue - MakingCost, (3) else keep None (NULL)
+  # Derive Profit: (1) DirectProfit column, or (2) Revenue - (Quantity * MakingCost), or (3) None
   revenue_series = clean_chunk["Quantity"] * clean_chunk["UnitPrice"]
-  if clean_chunk["DirectProfit"].notna().any():
+  if "DirectProfit" in clean_chunk.columns and clean_chunk["DirectProfit"].notna().any():
     clean_chunk["Profit"] = pd.to_numeric(
         clean_chunk["DirectProfit"].astype(str).str.replace(r"[₹$,]", "", regex=True),
         errors="coerce",
     ).round(2)
-  elif clean_chunk["MakingCost"].notna().any():
+  elif "MakingCost" in clean_chunk.columns and clean_chunk["MakingCost"].notna().any():
     unit_cost = pd.to_numeric(
         clean_chunk["MakingCost"].astype(str).str.replace(r"[₹$,]", "", regex=True),
         errors="coerce",
@@ -146,7 +144,9 @@ def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
     clean_chunk["Profit"] = (revenue_series - (clean_chunk["Quantity"] * unit_cost)).round(2)
   else:
     clean_chunk["Profit"] = None
-  
+
+  clean_chunk["tenant_id"] = tenant_id
+  clean_chunk["CustomerID"] = clean_chunk["CustomerID"].astype(str).str.replace(".0", "", regex=False)
   return clean_chunk, schema_mapping
 
 
@@ -247,7 +247,8 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
     api_key = "key-sample-sales"
 
   clean_first, schema_mapping = clean_chunk_fast(first_chunk, tenant_id)
-  db_cols = clean_first[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice"]]
+  # MUST include "Profit" in db_cols so SQLite saves the derived profit column!
+  db_cols = clean_first[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit"]]
   db_cols.to_sql("sales", conn, if_exists="append", index=False, chunksize=10000)
   conn.commit()
   conn.close()
