@@ -32,7 +32,7 @@ def init_db():
   except sqlite3.OperationalError:
     pass
 
-  # Create the sales table including the Product column for product-level trend analysis
+  # Create the sales table with a nullable Profit column (NULL when dataset lacks profit/cost data)
   cursor.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,15 +42,20 @@ def init_db():
             InvoiceDate TEXT NOT NULL,
             Product TEXT DEFAULT 'General Item',
             Quantity INTEGER NOT NULL,
-            UnitPrice REAL NOT NULL
+            UnitPrice REAL NOT NULL,
+            Profit REAL DEFAULT NULL
         )
     """)
 
-  # Safely add the Product column if upgrading from an older sales table without losing data
-  try:
-    cursor.execute("ALTER TABLE sales ADD COLUMN Product TEXT DEFAULT 'General Item';")
-  except sqlite3.OperationalError:
-    pass
+  # Safely migrate existing databases by adding Product and nullable Profit columns
+  for col_sql in [
+      "ALTER TABLE sales ADD COLUMN Product TEXT DEFAULT 'General Item';",
+      "ALTER TABLE sales ADD COLUMN Profit REAL DEFAULT NULL;",
+  ]:
+    try:
+      cursor.execute(col_sql)
+    except sqlite3.OperationalError:
+      pass
 
   # Create composite indexes on tenant_id, CustomerID, and Product for fast search and grouping
   cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_tenant ON sales(tenant_id, CustomerID);")
