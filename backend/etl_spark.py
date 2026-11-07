@@ -127,6 +127,9 @@ def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
   profit_col = next((orig for low, orig in lower_cols.items() if any(k in low for k in ["profit", "margin", "earnings", "gain"])), None)
   cost_col = next((orig for low, orig in lower_cols.items() if any(k in low for k in ["making_cost", "making cost", "unit_cost", "unit cost", "cogs", "cost_price", "buying_price", "wholesale", "cost"])), None)
 
+# Directly scan chunk columns for country, state, city, or region columns
+  loc_col = next((orig for low, orig in lower_cols.items() if any(k in low for k in ["country", "state", "city", "region", "location", "territory", "market", "zone"])), None)
+
   if profit_col:
     mapped_chunk["Profit"] = pd.to_numeric(chunk[profit_col].astype(str).str.replace(r"[₹$,]", "", regex=True), errors="coerce").round(2)
   elif cost_col:
@@ -134,6 +137,12 @@ def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
     mapped_chunk["Profit"] = ((mapped_chunk["Quantity"] * mapped_chunk["UnitPrice"]) - (mapped_chunk["Quantity"] * unit_cost)).round(2)
   else:
     mapped_chunk["Profit"] = None
+
+  # Directly scan chunk columns for country, state, city, or region columns and save into mapped_chunk["Location"]
+  loc_col = next((orig for low, orig in lower_cols.items() if any(k in low for k in ["country", "state", "city", "region", "location", "territory", "market", "zone"])), None)
+  mapped_chunk["Location"] = chunk[loc_col].astype(str).str.strip() if loc_col else None
+
+
 
   clean_chunk = mapped_chunk.dropna(
       subset=["CustomerID", "InvoiceNo", "Quantity", "UnitPrice"]
@@ -197,7 +206,7 @@ def _background_ingest_remaining_chunks(temp_path: str, filename: str, tenant_id
     for chunk in chunk_gen:
       clean_chunk, _ = clean_chunk_fast(chunk, tenant_id)
       if not clean_chunk.empty:
-        db_cols = clean_chunk[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit"]]
+        db_cols = clean_chunk[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit", "Location"]]
         db_cols.to_sql("sales", conn, if_exists="append", index=False, chunksize=10000)
         conn.commit()
 
