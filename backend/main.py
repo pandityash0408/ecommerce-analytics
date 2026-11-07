@@ -416,13 +416,19 @@ def get_product_trends(
   if active_start > active_end:
     active_start, active_end = active_end, active_start
 
+  # Check if this dataset has any non-null Profit values derived from Profit or MakingCost columns
+  cur = conn.cursor()
+  cur.execute("SELECT COUNT(Profit) FROM sales WHERE tenant_id = ? AND Profit IS NOT NULL", (tenant_id,))
+  has_profit = cur.fetchone()[0] > 0
+
   placeholders = ",".join(["?"] * len(products))
   query = f"""
         SELECT
             SUBSTR(InvoiceDate, 1, {date_len}) AS Period,
             Product,
             ROUND(SUM(Quantity * UnitPrice), 2) AS Revenue,
-            SUM(Quantity) AS Units
+            SUM(Quantity) AS Units,
+            ROUND(SUM(Profit), 2) AS Profit
         FROM sales
         WHERE tenant_id = ?
           AND Product IN ({placeholders})
@@ -444,10 +450,17 @@ def get_product_trends(
         "product": prod,
         "revenue": [float(prod_df.loc[p, "Revenue"]) if p in prod_df.index else 0.0 for p in filtered_periods],
         "units": [int(prod_df.loc[p, "Units"]) if p in prod_df.index else 0 for p in filtered_periods],
+        # Only populate profit numbers if has_profit is True; otherwise return an empty list []
+        "profit": (
+            [float(prod_df.loc[p, "Profit"]) if (p in prod_df.index and pd.notna(prod_df.loc[p, "Profit"])) else 0.0 for p in filtered_periods]
+            if has_profit
+            else []
+        ),
     })
 
   return {
       "granularity": granularity,
+      "has_profit": has_profit,
       "all_periods": all_available_periods,
       "start_period": active_start,
       "end_period": active_end,
