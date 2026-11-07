@@ -105,11 +105,12 @@ def auto_map_columns(df: pd.DataFrame):
 
 # Cleans a single DataFrame chunk using fast vectorized C-string operations
 # Cleans a single DataFrame chunk and derives Profit from DirectProfit or MakingCost
+# Cleans a single DataFrame chunk and automatically detects Direct Profit or Making Cost columns
 def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
   chunk.columns = [str(c).strip() for c in chunk.columns]
+  lower_cols = {c.lower(): c for c in chunk.columns}
   mapped_chunk, schema_mapping = auto_map_columns(chunk)
 
-  # Convert Quantity and UnitPrice to numeric values cleanly
   mapped_chunk["Quantity"] = pd.to_numeric(mapped_chunk["Quantity"], errors="coerce")
   if mapped_chunk["UnitPrice"].dtype == object:
     mapped_chunk["UnitPrice"] = pd.to_numeric(
@@ -122,28 +123,24 @@ def clean_chunk_fast(chunk: pd.DataFrame, tenant_id: str):
   mapped_chunk["InvoiceDate"] = mapped_chunk["InvoiceDate"].astype(str).str.slice(0, 10)
   mapped_chunk["Product"] = mapped_chunk["Product"].fillna("Standard Item").astype(str)
 
+  # Directly scan chunk columns for any profit column OR any cost/making_cost/cogs/buying_price column
+  profit_col = next((orig for low, orig in lower_cols.items() if any(k in low for k in ["profit", "margin", "earnings", "gain"])), None)
+  cost_col = next((orig for low, orig in lower_cols.items() if any(k in low for k in ["making_cost", "making cost", "unit_cost", "unit cost", "cogs", "cost_price", "buying_price", "wholesale", "cost"])), None)
+
+  if profit_col:
+    mapped_chunk["Profit"] = pd.to_numeric(chunk[profit_col].astype(str).str.replace(r"[₹$,]", "", regex=True), errors="coerce").round(2)
+  elif cost_col:
+    unit_cost = pd.to_numeric(chunk[cost_col].astype(str).str.replace(r"[₹$,]", "", regex=True), errors="coerce")
+    mapped_chunk["Profit"] = ((mapped_chunk["Quantity"] * mapped_chunk["UnitPrice"]) - (mapped_chunk["Quantity"] * unit_cost)).round(2)
+  else:
+    mapped_chunk["Profit"] = None
+
   clean_chunk = mapped_chunk.dropna(
       subset=["CustomerID", "InvoiceNo", "Quantity", "UnitPrice"]
   ).copy()
   clean_chunk = clean_chunk[
       (clean_chunk["Quantity"] > 0) & (clean_chunk["UnitPrice"] > 0)
   ].copy()
-
-  # Derive Profit: (1) DirectProfit column, or (2) Revenue - (Quantity * MakingCost), or (3) None
-  revenue_series = clean_chunk["Quantity"] * clean_chunk["UnitPrice"]
-  if "DirectProfit" in clean_chunk.columns and clean_chunk["DirectProfit"].notna().any():
-    clean_chunk["Profit"] = pd.to_numeric(
-        clean_chunk["DirectProfit"].astype(str).str.replace(r"[₹$,]", "", regex=True),
-        errors="coerce",
-    ).round(2)
-  elif "MakingCost" in clean_chunk.columns and clean_chunk["MakingCost"].notna().any():
-    unit_cost = pd.to_numeric(
-        clean_chunk["MakingCost"].astype(str).str.replace(r"[₹$,]", "", regex=True),
-        errors="coerce",
-    )
-    clean_chunk["Profit"] = (revenue_series - (clean_chunk["Quantity"] * unit_cost)).round(2)
-  else:
-    clean_chunk["Profit"] = None
 
   clean_chunk["tenant_id"] = tenant_id
   clean_chunk["CustomerID"] = clean_chunk["CustomerID"].astype(str).str.replace(".0", "", regex=False)
@@ -195,13 +192,11 @@ def _background_ingest_remaining_chunks(temp_path: str, filename: str, tenant_id
     conn.execute("PRAGMA cache_size=-64000;")
 
     chunk_gen = iterate_any_file_in_chunks(temp_path, filename)
-    # Skip chunk 0 because it was already loaded synchronously for instant UI display
     next(chunk_gen, None)
 
     for chunk in chunk_gen:
       clean_chunk, _ = clean_chunk_fast(chunk, tenant_id)
       if not clean_chunk.empty:
-        # Include the derived or nullable Profit column when inserting into SQLite
         db_cols = clean_chunk[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit"]]
         db_cols.to_sql("sales", conn, if_exists="append", index=False, chunksize=10000)
         conn.commit()
@@ -214,7 +209,6 @@ def _background_ingest_remaining_chunks(temp_path: str, filename: str, tenant_id
 
 # Loads the first 100k rows immediately (<2 seconds) so the UI updates right away, and streams the rest in background
 def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = None):
-  # Save uploaded stream to a fast local temporary file
   suffix = os.path.splitext(filename or "data.csv")[1] or ".csv"
   tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
   shutil.copyfileobj(file_obj, tmp)
@@ -225,6 +219,12 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
   conn.execute("PRAGMA journal_mode=WAL;")
   conn.execute("PRAGMA synchronous=OFF;")
   conn.execute("PRAGMA temp_store=MEMORY;")
+
+  # Guarantee the Profit column exists in the SQLite sales table before inserting
+  try:
+    conn.execute("ALTER TABLE sales ADD COLUMN Profit REAL DEFAULT NULL;")
+  except sqlite3.OperationalError:
+    pass
 
   chunk_gen = iterate_any_file_in_chunks(temp_path, filename or "sales.csv")
   first_chunk = next(chunk_gen, pd.DataFrame())
@@ -247,18 +247,15 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
     api_key = "key-sample-sales"
 
   clean_first, schema_mapping = clean_chunk_fast(first_chunk, tenant_id)
-  # MUST include "Profit" in db_cols so SQLite saves the derived profit column!
   db_cols = clean_first[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit"]]
   db_cols.to_sql("sales", conn, if_exists="append", index=False, chunksize=10000)
   conn.commit()
   conn.close()
 
-  # Write sample Parquet file to Hadoop Data Lake
   tenant_lake_path = os.path.join(DATA_LAKE_DIR, f"tenant_id={tenant_id}")
   os.makedirs(tenant_lake_path, exist_ok=True)
   clean_first.head(25000).to_parquet(os.path.join(tenant_lake_path, "sales_part_0001.parquet"), index=False)
 
-  # If the file has more than 100,000 rows, stream the remaining chunks in a background thread!
   if len(first_chunk) == 100000:
     bg_thread = threading.Thread(
         target=_background_ingest_remaining_chunks,
@@ -270,7 +267,7 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
     os.remove(temp_path)
 
   return {
-      "status": "Instant Dataset Load Complete (Background streaming active for 100k+ rows)",
+      "status": "Instant Dataset Load Complete",
       "tenant_id": tenant_id,
       "store_name": store_name,
       "api_key": api_key,
