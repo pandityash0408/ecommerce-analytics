@@ -367,15 +367,19 @@ def search_products(q: str = "", store: dict = Security(verify_api_key)):
   return {"products": df.to_dict(orient="records")}
 
 
+# Returns Year-wise or Month-wise product trends filtered between start_period (From) and end_period (To)
 @app.get("/products/trends")
 def get_product_trends(
     granularity: str = "month",
+    start_period: str = "",
+    end_period: str = "",
     products: list[str] = Query(default=[]),
     store: dict = Security(verify_api_key),
 ):
   tenant_id = store["tenant_id"]
   date_len = 4 if granularity == "year" else 7
 
+  # Split any comma-delimited product strings into clean individual product names
   clean_products = []
   for p in products:
     for item in p.split(","):
@@ -384,6 +388,16 @@ def get_product_trends(
   products = clean_products
 
   conn = sqlite3.connect(DB_PATH, timeout=60)
+
+  # Fetch all available years or year-months in this dataset to populate the client's From/To selectors
+  periods_df = pd.read_sql_query(
+      f"SELECT DISTINCT SUBSTR(InvoiceDate, 1, {date_len}) AS Period FROM sales WHERE tenant_id = ? ORDER BY Period ASC",
+      conn,
+      params=(tenant_id,),
+  )
+  all_available_periods = [p for p in periods_df["Period"].dropna().tolist() if len(str(p)) == date_len]
+
+  # Default to top 3 products by revenue if none are explicitly selected yet
   if not products:
     top_df = pd.read_sql_query(
         "SELECT Product FROM sales WHERE tenant_id = ? GROUP BY Product ORDER BY SUM(Quantity * UnitPrice) DESC LIMIT 3",
@@ -392,9 +406,15 @@ def get_product_trends(
     )
     products = top_df["Product"].tolist()
 
-  if not products:
+  if not products or not all_available_periods:
     conn.close()
-    return {"periods": [], "series": [], "selected_products": []}
+    return {"periods": [], "all_periods": all_available_periods, "series": [], "selected_products": []}
+
+  # Apply From (start_period) and To (end_period) range bounds
+  active_start = start_period if start_period in all_available_periods else all_available_periods[0]
+  active_end = end_period if end_period in all_available_periods else all_available_periods[-1]
+  if active_start > active_end:
+    active_start, active_end = active_end, active_start
 
   placeholders = ",".join(["?"] * len(products))
   query = f"""
@@ -404,25 +424,37 @@ def get_product_trends(
             ROUND(SUM(Quantity * UnitPrice), 2) AS Revenue,
             SUM(Quantity) AS Units
         FROM sales
-        WHERE tenant_id = ? AND Product IN ({placeholders})
+        WHERE tenant_id = ?
+          AND Product IN ({placeholders})
+          AND SUBSTR(InvoiceDate, 1, {date_len}) >= ?
+          AND SUBSTR(InvoiceDate, 1, {date_len}) <= ?
         GROUP BY Period, Product
         ORDER BY Period ASC
     """
-  df = pd.read_sql_query(query, conn, params=[tenant_id] + list(products))
+  df = pd.read_sql_query(
+      query, conn, params=[tenant_id] + list(products) + [active_start, active_end]
+  )
   conn.close()
 
-  periods = sorted(df["Period"].dropna().unique().tolist())
+  filtered_periods = [p for p in all_available_periods if active_start <= p <= active_end]
   series = []
   for prod in products:
     prod_df = df[df["Product"] == prod].set_index("Period")
     series.append({
         "product": prod,
-        "revenue": [float(prod_df.loc[p, "Revenue"]) if p in prod_df.index else 0.0 for p in periods],
-        "units": [int(prod_df.loc[p, "Units"]) if p in prod_df.index else 0 for p in periods],
+        "revenue": [float(prod_df.loc[p, "Revenue"]) if p in prod_df.index else 0.0 for p in filtered_periods],
+        "units": [int(prod_df.loc[p, "Units"]) if p in prod_df.index else 0 for p in filtered_periods],
     })
 
-  return {"granularity": granularity, "periods": periods, "series": series, "selected_products": products}
-
+  return {
+      "granularity": granularity,
+      "all_periods": all_available_periods,
+      "start_period": active_start,
+      "end_period": active_end,
+      "periods": filtered_periods,
+      "series": series,
+      "selected_products": products,
+  }
 
 @app.get("/hello")
 def say_hello():
