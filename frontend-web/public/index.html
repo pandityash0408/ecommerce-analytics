@@ -9,6 +9,7 @@
   <!-- Load Tailwind CSS and Chart.js for clean enterprise layout and charting -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
   <!-- Minimal enterprise stylesheet: crisp white panels, neutral slate borders, high density -->
@@ -126,27 +127,36 @@
             </div>
 
             <!-- Granularity (Month vs Year), From -> To Date Range Selectors, and Metric Selector -->
+            <!-- Chart Type (Line, Bar, Map), Granularity, From -> To Date Range, and Metric Selector -->
             <div class="flex flex-wrap items-center gap-2">
-              <select id="trendGranularity" onchange="onGranularityChange()" class="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none">
-                <option value="month">Month-wise</option>
-                <option value="year">Year-wise</option>
+              <select id="chartStyleSelect" onchange="onChartStyleChange()" class="bg-slate-900 text-white border border-slate-900 rounded px-2.5 py-1 text-xs font-semibold focus:outline-none cursor-pointer">
+                <option value="line">Line Chart</option>
+                <option value="bar">Bar Graph</option>
+                <option value="map">Map Graph</option>
               </select>
 
-              <div class="flex items-center space-x-1 bg-slate-50 border border-slate-300 rounded px-2 py-1">
-                <span class="text-[11px] text-slate-500 font-medium">From:</span>
-                <select id="startPeriodSelect" onchange="loadProductTrends()" class="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"></select>
-                <span class="text-[11px] text-slate-400 px-0.5">→</span>
-                <span class="text-[11px] text-slate-500 font-medium">To:</span>
-                <select id="endPeriodSelect" onchange="loadProductTrends()" class="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"></select>
+              <div id="timeControlsGroup" class="flex items-center gap-2">
+                <select id="trendGranularity" onchange="onGranularityChange()" class="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none">
+                  <option value="month">Month-wise</option>
+                  <option value="year">Year-wise</option>
+                </select>
+
+                <div class="flex items-center space-x-1 bg-slate-50 border border-slate-300 rounded px-2 py-1">
+                  <span class="text-[11px] text-slate-500 font-medium">From:</span>
+                  <select id="startPeriodSelect" onchange="loadProductTrends()" class="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"></select>
+                  <span class="text-[11px] text-slate-400 px-0.5">→</span>
+                  <span class="text-[11px] text-slate-500 font-medium">To:</span>
+                  <select id="endPeriodSelect" onchange="loadProductTrends()" class="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"></select>
+                </div>
               </div>
 
-              <!-- Metric selector supporting Revenue, Units Sold, and derived Profit -->
               <select id="trendMetric" onchange="loadProductTrends()" class="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none">
                 <option value="revenue">Revenue (₹)</option>
                 <option value="units">Units Sold</option>
                 <option value="profit">Profit (₹)</option>
               </select>
             </div>
+
           </div>
 
           <div class="space-y-2">
@@ -164,8 +174,12 @@
             <div id="selectedProductsChips" class="flex flex-wrap gap-1.5"></div>
           </div>
 
-          <div class="h-72 pt-1">
+          <div class="h-72 pt-1 relative">
             <canvas id="productTrendChart"></canvas>
+            <div id="productGeoMap" class="hidden absolute inset-0 bg-white"></div>
+            <div id="mapNotice" class="hidden absolute inset-0 flex items-center justify-center text-xs text-slate-500 bg-white border border-dashed border-slate-200 rounded">
+              Location data not present in this dataset (no Country, State, or City column found).
+            </div>
           </div>
         </div>
 
@@ -497,7 +511,34 @@
     }
 
     // Fetches and renders Product Trends filtered between the selected From and To Year/Month
+    // Switches between Line Chart, Bar Graph, and Map Graph when the user changes the chart style dropdown
+    function onChartStyleChange() {
+      const style = document.getElementById("chartStyleSelect").value;
+      const isMap = style === "map";
+      document.getElementById("timeControlsGroup").style.display = isMap ? "none" : "flex";
+      loadProductTrends();
+    }
+
+    // Fetches and renders either Line/Bar charts via Chart.js or Geographic Map via Plotly.js
     async function loadProductTrends() {
+      const styleEl = document.getElementById("chartStyleSelect");
+      const style = styleEl ? styleEl.value : "line";
+      const canvasEl = document.getElementById("productTrendChart");
+      const mapEl = document.getElementById("productGeoMap");
+      const noticeEl = document.getElementById("mapNotice");
+
+      // If Map Graph is selected, hide the line/bar canvas and render the geographic world map
+      if (style === "map") {
+        canvasEl.classList.add("hidden");
+        await renderGeoMap();
+        return;
+      }
+
+      // Otherwise hide the map elements and show the Chart.js canvas for Line or Bar mode
+      if (mapEl) mapEl.classList.add("hidden");
+      if (noticeEl) noticeEl.classList.add("hidden");
+      canvasEl.classList.remove("hidden");
+
       const granularity = document.getElementById("trendGranularity").value;
       const metric = document.getElementById("trendMetric").value;
       const startSel = document.getElementById("startPeriodSelect");
@@ -516,7 +557,7 @@
       if (!res.ok) return;
       const data = await res.json();
 
-      // Populate the From and To period dropdowns with all available years or months in the dataset
+      // Populate From and To period selectors with available years or months
       const allPeriods = data.all_periods || [];
       if (allPeriods.length > 0 && startSel.options.length !== allPeriods.length) {
         startSel.innerHTML = allPeriods.map(p => `<option value="${p}">${p}</option>`).join("");
@@ -535,24 +576,23 @@
           </span>
         `;
       }).join("");
-      
-const palette = ["#0f172a", "#2563eb", "#0d9488", "#d97706", "#dc2626", "#4f46e5"];
-      // If user selected 'profit' but dataset lacks Profit/MakingCost columns, keep chart datasets empty
+
+      const palette = ["#0f172a", "#2563eb", "#0d9488", "#d97706", "#dc2626", "#4f46e5"];
       const isProfitMissing = (metric === "profit" && !data.has_profit);
       const datasets = isProfitMissing ? [] : (data.series || []).map((s, idx) => ({
         label: s.product,
         data: metric === "units" ? s.units : (metric === "profit" ? s.profit : s.revenue),
         borderColor: palette[idx % palette.length],
-        backgroundColor: palette[idx % palette.length],
-        borderWidth: 2,
+        backgroundColor: style === "bar" ? palette[idx % palette.length] + "cc" : palette[idx % palette.length],
+        borderWidth: style === "bar" ? 1 : 2,
         tension: 0.2,
-        borderRadius: 3
+        borderRadius: style === "bar" ? 3 : 0,
       }));
 
       if (productChartInstance) productChartInstance.destroy();
-      const ctx = document.getElementById("productTrendChart").getContext("2d");
+      const ctx = canvasEl.getContext("2d");
       productChartInstance = new Chart(ctx, {
-        type: data.periods && data.periods.length > 1 ? "line" : "bar",
+        type: style, // Automatically switches Chart.js between "line" and "bar"
         data: { labels: data.periods || [], datasets },
         options: {
           responsive: true,
@@ -566,6 +606,60 @@ const palette = ["#0f172a", "#2563eb", "#0d9488", "#d97706", "#dc2626", "#4f46e5
           }
         }
       });
+    }
+
+    // Fetches country/location totals from /api/products/geo-trends and renders a Plotly Choropleth Map
+    async function renderGeoMap() {
+      const mapEl = document.getElementById("productGeoMap");
+      const noticeEl = document.getElementById("mapNotice");
+      const metric = document.getElementById("trendMetric").value;
+
+      const params = new URLSearchParams();
+      selectedProducts.forEach(p => params.append("products", p));
+
+      const res = await fetch(`/api/products/geo-trends?${params.toString()}`, {
+        headers: { "x-api-key": activeApiKey }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // If the dataset has no Location/Country column (or Profit is selected when Profit is missing), show empty notice
+      const hasValidProfit = metric !== "profit" || data.locations.some(l => l.profit !== null);
+      if (!data.has_location || !data.locations || data.locations.length === 0 || !hasValidProfit) {
+        mapEl.classList.add("hidden");
+        noticeEl.classList.remove("hidden");
+        return;
+      }
+
+      noticeEl.classList.add("hidden");
+      mapEl.classList.remove("hidden");
+
+      const locNames = data.locations.map(l => l.location);
+      const values = data.locations.map(l => metric === "units" ? l.units : (metric === "profit" ? (l.profit || 0) : l.revenue));
+      const metricLabel = metric === "units" ? "Units Sold" : (metric === "profit" ? "Profit (₹)" : "Revenue (₹)");
+
+      const plotData = [{
+        type: "choropleth",
+        locationmode: "country names",
+        locations: locNames,
+        z: values,
+        colorscale: "Blues",
+        reversescale: true,
+        colorbar: { thickness: 10, len: 0.8, title: { text: metricLabel, font: { size: 10 } } }
+      }];
+
+      const layout = {
+        geo: {
+          showframe: false,
+          showcoastlines: true,
+          projection: { type: "natural earth" },
+          bgcolor: "#ffffff"
+        },
+        margin: { l: 0, r: 0, t: 10, b: 0 },
+        paper_bgcolor: "#ffffff"
+      };
+
+      Plotly.newPlot("productGeoMap", plotData, layout, { responsive: true, displayModeBar: false });
     }
 
     function renderCustomerRows(customers) {
@@ -682,11 +776,11 @@ const palette = ["#0f172a", "#2563eb", "#0d9488", "#d97706", "#dc2626", "#4f46e5
       }
 
       progressBar.style.width = "100%";
-      toastText.innerText = `Successfully indexed ${files.length} dataset(s).`;
-      selectedProducts = [];
-      await refreshDatasetSidebar(lastApiKey);
-      await loadStoreData(0);
-    }
+   toastText.innerText = `Successfully indexed ${files.length} dataset(s).`;
+   event.target.value = "";
+   setTimeout(() => {
+     toast.classList.add("hidden");
+   }, 1500);
 
     async function eraseCustomerDpdp() {
       if (!selectedCustomerId) return;
