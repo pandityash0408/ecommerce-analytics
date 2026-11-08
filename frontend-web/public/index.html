@@ -1,18 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Configure character encoding and responsive viewport -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Customer Behavior & Product Analytics</title>
 
-  <!-- Load Tailwind CSS and Chart.js for clean enterprise layout and charting -->
+  <!-- Tailwind CSS, Chart.js for Line/Bar, and Plotly.js for the Geographic World Map -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- Minimal enterprise stylesheet: crisp white panels, neutral slate borders, high density -->
   <style>
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #f8fafc; color: #0f172a; }
     .panel { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; }
@@ -21,7 +19,7 @@
 </head>
 <body class="min-h-screen flex flex-col">
 
-  <!-- TOP ENTERPRISE HEADER BAR: Sidebar Toggle, App Title, Active Dataset Filename, and Multi-File Upload -->
+  <!-- TOP HEADER BAR -->
   <header class="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-2.5 flex justify-between items-center">
     <div class="flex items-center space-x-3">
       <button onclick="toggleSidebar()" class="p-1.5 rounded border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium" title="Toggle Datasets Sidebar">
@@ -32,12 +30,10 @@
     </div>
 
     <div class="flex items-center space-x-3">
-      <!-- Displays ONLY the clean name of the currently active dataset file -->
       <span id="activeFileName" class="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded">
         Loading dataset...
       </span>
 
-      <!-- Multi-file & Multi-format dataset upload button -->
       <label class="cursor-pointer px-3 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-xs font-medium text-white transition">
         Upload File(s)
         <input type="file" id="csvFileInput" multiple accept=".csv,.xlsx,.xls,.parquet,.json,.jsonl,.tsv,.txt,.xml,.zip,.gz" class="hidden" onchange="uploadUniversalCsv(event)" />
@@ -45,7 +41,7 @@
     </div>
   </header>
 
-  <!-- UPLOAD PROGRESS BAR -->
+  <!-- UPLOAD PROGRESS BANNER -->
   <div id="etlToast" class="hidden bg-slate-50 border-b border-slate-200 px-4 py-2">
     <div class="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-700">
       <div id="etlToastText" class="font-medium"></div>
@@ -58,16 +54,15 @@
     </div>
   </div>
 
-  <!-- MAIN WORKSPACE: Collapsible Left Sidebar + High-Density Enterprise Content Area -->
+  <!-- MAIN WORKSPACE -->
   <div class="flex-1 flex overflow-hidden">
 
-    <!-- COLLAPSIBLE LEFT SIDEBAR: Supports 100+ datasets with live filter box and instant O(1) switching -->
+    <!-- COLLAPSIBLE LEFT DATASET SIDEBAR -->
     <aside id="datasetSidebar" class="w-64 bg-white border-r border-slate-200 flex-shrink-0 flex flex-col sidebar-transition">
       <div class="px-3.5 py-2.5 border-b border-slate-200 flex justify-between items-center">
         <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Uploaded Files</span>
         <span id="datasetCount" class="text-xs text-slate-400 font-medium">0</span>
       </div>
-      <!-- Search filter for navigating 100+ datasets in the sidebar -->
       <div class="p-2 border-b border-slate-100">
         <input
           type="text"
@@ -80,10 +75,10 @@
       <div id="sidebarFileList" class="flex-1 overflow-y-auto divide-y divide-slate-100 p-1.5 space-y-0.5"></div>
     </aside>
 
-    <!-- MAIN CONTENT AREA -->
+    <!-- MAIN DASHBOARD CONTENT -->
     <main class="flex-1 overflow-y-auto p-5 space-y-5 max-w-[1600px] mx-auto">
 
-      <!-- ROW 1: 5 UNIFORM KPI CARDS -->
+      <!-- ROW 1: 5 KPI CARDS -->
       <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         <div class="panel p-3.5">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Total Revenue</p>
@@ -116,18 +111,17 @@
         </div>
       </section>
 
-      <!-- ROW 2: PRODUCT SALES TREND CHART WITH FROM-TO DATE RANGE (2 COLS) + TOP PRODUCTS LEADERBOARD (1 COL) -->
+      <!-- ROW 2: PRODUCT SALES ANALYSIS (LINE / BAR / MAP GRAPH) + TOP PRODUCTS LEADERBOARD -->
       <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         <div class="panel p-4 lg:col-span-2 space-y-3">
           <div class="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-2.5">
             <div>
-              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Product Sales Analysis (From — To Date Range)</h2>
-              <p class="text-[11px] text-slate-500">Select Month-wise or Year-wise and pick your custom From → To range</p>
+              <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Product Sales Analysis</h2>
+              <p class="text-[11px] text-slate-500">Switch between Line, Bar, and Map graphs; filter by Date Range and Metric</p>
             </div>
 
-            <!-- Granularity (Month vs Year), From -> To Date Range Selectors, and Metric Selector -->
-            <!-- Chart Type (Line, Bar, Map), Granularity, From -> To Date Range, and Metric Selector -->
+            <!-- Controls: Chart Type, Granularity, Date Range, Metric -->
             <div class="flex flex-wrap items-center gap-2">
               <select id="chartStyleSelect" onchange="onChartStyleChange()" class="bg-slate-900 text-white border border-slate-900 rounded px-2.5 py-1 text-xs font-semibold focus:outline-none cursor-pointer">
                 <option value="line">Line Chart</option>
@@ -156,9 +150,9 @@
                 <option value="profit">Profit (₹)</option>
               </select>
             </div>
-
           </div>
 
+          <!-- Product Search Bar & Chips -->
           <div class="space-y-2">
             <div class="relative">
               <input
@@ -174,6 +168,7 @@
             <div id="selectedProductsChips" class="flex flex-wrap gap-1.5"></div>
           </div>
 
+          <!-- Chart Area: Line/Bar Canvas OR Plotly Map Div OR Empty State Notice -->
           <div class="h-72 pt-1 relative">
             <canvas id="productTrendChart"></canvas>
             <div id="productGeoMap" class="hidden absolute inset-0 bg-white"></div>
@@ -183,7 +178,7 @@
           </div>
         </div>
 
-        <!-- Top Products Performance Leaderboard -->
+        <!-- Top Products Leaderboard -->
         <div class="panel p-4 flex flex-col">
           <div class="border-b border-slate-200 pb-2.5 mb-2.5">
             <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700">Top Products Leaderboard</h2>
@@ -206,7 +201,7 @@
 
       </section>
 
-      <!-- ROW 3: CUSTOMER BEHAVIOR SEGMENTATION TABLE & REAL ORDER LEDGER INSPECTOR -->
+      <!-- ROW 3: CUSTOMER SEGMENTATION TABLE & ACCOUNT INSPECTOR -->
       <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         <div class="panel p-4 lg:col-span-2 flex flex-col">
@@ -247,7 +242,7 @@
           </div>
         </div>
 
-        <!-- Customer Account Inspector -->
+        <!-- Customer 360 Detail Panel -->
         <div class="panel p-4 flex flex-col justify-between space-y-3">
           <div>
             <div class="flex justify-between items-center border-b border-slate-200 pb-2">
@@ -390,14 +385,19 @@
       await loadStoreData(0);
     }
 
-    // Resets the From/To range selectors when switching between Month-wise and Year-wise mode
     function onGranularityChange() {
       document.getElementById("startPeriodSelect").innerHTML = "";
       document.getElementById("endPeriodSelect").innerHTML = "";
       loadProductTrends();
     }
 
-    // Resets product and date range filters when switching datasets in the left sidebar
+    function onChartStyleChange() {
+      const style = document.getElementById("chartStyleSelect").value;
+      const isMap = style === "map";
+      document.getElementById("timeControlsGroup").style.display = isMap ? "none" : "flex";
+      loadProductTrends();
+    }
+
     function switchDataset(apiKey) {
       activeApiKey = apiKey;
       localStorage.setItem("lastActiveDatasetKey", apiKey);
@@ -510,16 +510,6 @@
       loadProductTrends();
     }
 
-    // Fetches and renders Product Trends filtered between the selected From and To Year/Month
-    // Switches between Line Chart, Bar Graph, and Map Graph when the user changes the chart style dropdown
-    function onChartStyleChange() {
-      const style = document.getElementById("chartStyleSelect").value;
-      const isMap = style === "map";
-      document.getElementById("timeControlsGroup").style.display = isMap ? "none" : "flex";
-      loadProductTrends();
-    }
-
-    // Fetches and renders either Line/Bar charts via Chart.js or Geographic Map via Plotly.js
     async function loadProductTrends() {
       const styleEl = document.getElementById("chartStyleSelect");
       const style = styleEl ? styleEl.value : "line";
@@ -527,14 +517,12 @@
       const mapEl = document.getElementById("productGeoMap");
       const noticeEl = document.getElementById("mapNotice");
 
-      // If Map Graph is selected, hide the line/bar canvas and render the geographic world map
       if (style === "map") {
         canvasEl.classList.add("hidden");
         await renderGeoMap();
         return;
       }
 
-      // Otherwise hide the map elements and show the Chart.js canvas for Line or Bar mode
       if (mapEl) mapEl.classList.add("hidden");
       if (noticeEl) noticeEl.classList.add("hidden");
       canvasEl.classList.remove("hidden");
@@ -557,7 +545,6 @@
       if (!res.ok) return;
       const data = await res.json();
 
-      // Populate From and To period selectors with available years or months
       const allPeriods = data.all_periods || [];
       if (allPeriods.length > 0 && startSel.options.length !== allPeriods.length) {
         startSel.innerHTML = allPeriods.map(p => `<option value="${p}">${p}</option>`).join("");
@@ -592,7 +579,7 @@
       if (productChartInstance) productChartInstance.destroy();
       const ctx = canvasEl.getContext("2d");
       productChartInstance = new Chart(ctx, {
-        type: style, // Automatically switches Chart.js between "line" and "bar"
+        type: style,
         data: { labels: data.periods || [], datasets },
         options: {
           responsive: true,
@@ -608,7 +595,6 @@
       });
     }
 
-    // Fetches country/location totals from /api/products/geo-trends and renders a Plotly Choropleth Map
     async function renderGeoMap() {
       const mapEl = document.getElementById("productGeoMap");
       const noticeEl = document.getElementById("mapNotice");
@@ -623,7 +609,6 @@
       if (!res.ok) return;
       const data = await res.json();
 
-      // If the dataset has no Location/Country column (or Profit is selected when Profit is missing), show empty notice
       const hasValidProfit = metric !== "profit" || data.locations.some(l => l.profit !== null);
       if (!data.has_location || !data.locations || data.locations.length === 0 || !hasValidProfit) {
         mapEl.classList.add("hidden");
@@ -745,7 +730,7 @@
         const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
         const progressPct = Math.round(((i + 0.3) / files.length) * 100);
         progressBar.style.width = progressPct + "%";
-        toastText.innerText = `[${i + 1}/${files.length}] Sampling & indexing ${file.name} (${sizeMB} MB)...`;
+        toastText.innerText = `[${i + 1}/${files.length}] Indexing ${file.name} (${sizeMB} MB)...`;
 
         try {
           const SLICE_BYTES = 4 * 1024 * 1024;
@@ -776,11 +761,16 @@
       }
 
       progressBar.style.width = "100%";
-   toastText.innerText = `Successfully indexed ${files.length} dataset(s).`;
-   event.target.value = "";
-   setTimeout(() => {
-     toast.classList.add("hidden");
-   }, 1500);
+      toastText.innerText = `Successfully indexed ${files.length} dataset(s).`;
+      event.target.value = "";
+      setTimeout(() => {
+        toast.classList.add("hidden");
+      }, 2500);
+
+      selectedProducts = [];
+      await refreshDatasetSidebar(lastApiKey);
+      await loadStoreData(0);
+    }
 
     async function eraseCustomerDpdp() {
       if (!selectedCustomerId) return;
