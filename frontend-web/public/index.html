@@ -407,7 +407,8 @@
 
     async function loadStoreData(retryCount = 0) {
       try {
-        if (!activeApiKey) await refreshDatasetSidebar();
+        // Always populate the left sidebar if it is still empty when the backend finishes waking up!
+        if (!activeApiKey || allStoresCache.length === 0) await refreshDatasetSidebar();
         const res = await fetch("/api/insights", { headers: { "x-api-key": activeApiKey } });
         if (!res.ok) throw new Error("Backend starting");
         const data = await res.json();
