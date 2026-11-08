@@ -121,6 +121,19 @@ app.delete("/api/stores/:tenantId", async (req, res) => {
   }
 });
 
+// Proxies geographic product trends requests from the browser to the FastAPI backend
+app.get("/api/products/geo-trends", async (req, res) => {
+  try {
+    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
+    const rawQuery = req.originalUrl.includes("?") ? req.originalUrl.split("?")[1] : "";
+    const response = await fetch(`${BACKEND_URL}/products/geo-trends?${rawQuery}`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    res.status(response.status).json(await response.json());
+  } catch (err) {
+    res.status(500).json({ detail: err.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Enterprise Analytics Dashboard running on http://localhost:${PORT}`);

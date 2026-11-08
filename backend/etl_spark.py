@@ -256,7 +256,7 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
     api_key = "key-sample-sales"
 
   clean_first, schema_mapping = clean_chunk_fast(first_chunk, tenant_id)
-  db_cols = clean_first[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit"]]
+  db_cols = clean_first[["tenant_id", "InvoiceNo", "CustomerID", "InvoiceDate", "Product", "Quantity", "UnitPrice", "Profit", "Location"]]
   db_cols.to_sql("sales", conn, if_exists="append", index=False, chunksize=10000)
   conn.commit()
   conn.close()
