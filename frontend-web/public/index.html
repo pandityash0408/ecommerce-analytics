@@ -129,6 +129,11 @@
                 <option value="map">Map Graph</option>
               </select>
 
+              <!-- Country Filter Dropdown (Automatically populated when dataset contains countries) -->
+              <select id="countryFilterSelect" onchange="onCountryFilterChange()" class="hidden bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer">
+                <option value="">All Countries</option>
+              </select>
+
               <div id="timeControlsGroup" class="flex items-center gap-2">
                 <select id="trendGranularity" onchange="onGranularityChange()" class="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-700 focus:outline-none">
                   <option value="month">Month-wise</option>
