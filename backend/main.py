@@ -213,6 +213,7 @@ def get_store_insights(store: dict = Security(verify_api_key)):
   )
 
   # 5. Query Top 10 Products Leaderboard by Revenue & Units
+  # 5. Query Top 10 Products Leaderboard by Revenue & Units
   top_products_df = pd.read_sql_query(
       """
       SELECT
@@ -229,11 +230,17 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       conn,
       params=(tenant_id,),
   )
-  conn.close()
+
+  # 6. Query Geographic Location totals directly inside store-insights (AFTER top_products_df finishes!)
+  loc_df = pd.read_sql_query(
+      "SELECT Location AS location, ROUND(SUM(Quantity * UnitPrice), 2) AS revenue, SUM(Quantity) AS units, ROUND(SUM(Profit), 2) AS profit FROM sales WHERE tenant_id = ? AND Location IS NOT NULL AND Location != '' GROUP BY Location ORDER BY revenue DESC",
+      conn,
+      params=(tenant_id,),
+  )
 
   top_products = []
   for _, prow in top_products_df.iterrows():
-    share = round(( float(prow["Revenue"]) / total_revenue ) * 100, 1) if total_revenue else 0.0
+    share = round((float(prow["Revenue"]) / total_revenue) * 100, 1) if total_revenue else 0.0
     top_products.append({
         "Product": prow["Product"],
         "Units_Sold": int(prow["Units_Sold"]),
@@ -241,7 +248,7 @@ def get_store_insights(store: dict = Security(verify_api_key)):
         "Revenue": float(prow["Revenue"]),
         "Revenue_Share_%": share,
     })
-
+    
   avg_spend = round(total_revenue / total_customers, 2) if total_customers else 0
   customers = calculate_rfm_for_tenant(tenant_id)
 
@@ -329,7 +336,8 @@ def get_store_insights(store: dict = Security(verify_api_key)):
       },
       "segment_summary": segment_summary,
       "top_products": top_products,
-      "customer_behavior": enriched_customers[:150],
+      "locations": loc_df.to_dict(orient="records"),
+      "customer_behavior": enriched_customers[:150],  
   }
 
 
