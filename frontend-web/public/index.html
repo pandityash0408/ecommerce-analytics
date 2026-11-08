@@ -390,11 +390,8 @@
       document.getElementById("endPeriodSelect").innerHTML = "";
       loadProductTrends();
     }
-
+// Keep date range controls visible for all 3 chart styles so clients can filter the map by date too
     function onChartStyleChange() {
-      const style = document.getElementById("chartStyleSelect").value;
-      const isMap = style === "map";
-      document.getElementById("timeControlsGroup").style.display = isMap ? "none" : "flex";
       loadProductTrends();
     }
 
@@ -518,10 +515,13 @@
       const noticeEl = document.getElementById("mapNotice");
 
       if (style === "map") {
-        canvasEl.classList.add("hidden");
+        // Destroy the existing Line/Bar Chart.js instance first so it doesn't stay drawn on screen
+        if (productChartInstance) { productChartInstance.destroy(); productChartInstance = null; }
+        canvasEl.style.display = "none";
         await renderGeoMap();
         return;
       }
+      canvasEl.style.display = "block";
 
       if (mapEl) mapEl.classList.add("hidden");
       if (noticeEl) noticeEl.classList.add("hidden");
@@ -595,12 +595,18 @@
       });
     }
 
+    // Renders the Geographic World Map and Ranked Country Grid without needing external Plotly CDNs
     async function renderGeoMap() {
       const mapEl = document.getElementById("productGeoMap");
       const noticeEl = document.getElementById("mapNotice");
       const metric = document.getElementById("trendMetric").value;
+      const startSel = document.getElementById("startPeriodSelect");
+      const endSel = document.getElementById("endPeriodSelect");
 
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({
+        start_period: startSel.value || "",
+        end_period: endSel.value || "",
+      });
       selectedProducts.forEach(p => params.append("products", p));
 
       const res = await fetch(`/api/products/geo-trends?${params.toString()}`, {
@@ -609,7 +615,7 @@
       if (!res.ok) return;
       const data = await res.json();
 
-      const hasValidProfit = metric !== "profit" || data.locations.some(l => l.profit !== null);
+      const hasValidProfit = metric !== "profit" || (data.locations && data.locations.some(l => l.profit !== null));
       if (!data.has_location || !data.locations || data.locations.length === 0 || !hasValidProfit) {
         mapEl.classList.add("hidden");
         noticeEl.classList.remove("hidden");
@@ -619,34 +625,77 @@
       noticeEl.classList.add("hidden");
       mapEl.classList.remove("hidden");
 
-      const locNames = data.locations.map(l => l.location);
+      const metricLabel = metric === "units" ? "Units" : (metric === "profit" ? "Profit" : "Revenue");
       const values = data.locations.map(l => metric === "units" ? l.units : (metric === "profit" ? (l.profit || 0) : l.revenue));
-      const metricLabel = metric === "units" ? "Units Sold" : (metric === "profit" ? "Profit (₹)" : "Revenue (₹)");
+      const maxVal = Math.max(...values, 1);
 
-      const plotData = [{
-        type: "choropleth",
-        locationmode: "country names",
-        locations: locNames,
-        z: values,
-        colorscale: "Blues",
-        reversescale: true,
-        colorbar: { thickness: 10, len: 0.8, title: { text: metricLabel, font: { size: 10 } } }
-      }];
-
-      const layout = {
-        geo: {
-          showframe: false,
-          showcoastlines: true,
-          projection: { type: "natural earth" },
-          bgcolor: "#ffffff"
-        },
-        margin: { l: 0, r: 0, t: 10, b: 0 },
-        paper_bgcolor: "#ffffff"
+      const geoCoords = {
+        "united states": { x: 20, y: 36, code: "US" },
+        "india": { x: 69, y: 47, code: "IN" },
+        "united kingdom": { x: 47, y: 25, code: "UK" },
+        "germany": { x: 51, y: 27, code: "DE" },
+        "japan": { x: 86, y: 36, code: "JP" },
+        "canada": { x: 20, y: 22, code: "CA" },
+        "australia": { x: 84, y: 74, code: "AU" },
+        "brazil": { x: 33, y: 66, code: "BR" },
+        "france": { x: 48, y: 31, code: "FR" },
+        "united arab emirates": { x: 61, y: 44, code: "AE" },
+        "singapore": { x: 76, y: 56, code: "SG" },
+        "south korea": { x: 82, y: 36, code: "KR" },
+        "netherlands": { x: 49, y: 26, code: "NL" },
+        "spain": { x: 46, y: 34, code: "ES" },
+        "mexico": { x: 18, y: 45, code: "MX" }
       };
 
-      Plotly.newPlot("productGeoMap", plotData, layout, { responsive: true, displayModeBar: false });
-    }
+      const sortedLocs = [...data.locations].sort((a, b) => {
+        const valA = metric === "units" ? a.units : (metric === "profit" ? (a.profit || 0) : a.revenue);
+        const valB = metric === "units" ? b.units : (metric === "profit" ? (b.profit || 0) : b.revenue);
+        return valB - valA;
+      });
 
+      mapEl.innerHTML = `
+        <div class="h-full flex flex-col justify-between p-1">
+          <div class="relative w-full h-44 bg-slate-50 border border-slate-200 rounded overflow-hidden">
+            <svg viewBox="0 0 100 85" class="w-full h-full opacity-25 pointer-events-none fill-slate-400">
+              <path d="M 10,15 Q 22,12 30,22 Q 26,38 18,45 Q 12,32 10,15 Z" />
+              <path d="M 28,50 Q 38,52 35,68 Q 30,80 27,70 Z" />
+              <path d="M 46,20 Q 56,18 55,32 Q 47,38 45,26 Z M 44,40 Q 58,40 54,52 Q 45,50 44,40 Z" />
+              <path d="M 58,20 Q 82,18 85,38 Q 72,50 62,40 Z" />
+              <path d="M 78,68 Q 88,68 86,78 Q 78,80 78,68 Z" />
+            </svg>
+            ${sortedLocs.map(l => {
+              const key = String(l.location).toLowerCase().trim();
+              const coord = geoCoords[key] || { x: 50, y: 50, code: String(l.location).slice(0, 2).toUpperCase() };
+              const val = metric === "units" ? l.units : (metric === "profit" ? (l.profit || 0) : l.revenue);
+              const displayVal = metric === "units" ? val.toLocaleString("en-IN") : "₹" + Math.round(val).toLocaleString("en-IN");
+              return `
+                <div style="left: ${coord.x}%; top: ${coord.y}%;" class="absolute -translate-x-1/2 -translate-y-1/2 group cursor-pointer" title="${l.location}: ${displayVal}">
+                  <span class="relative inline-flex rounded-full h-5 w-5 bg-slate-900 text-[8px] text-white font-bold items-center justify-center shadow">
+                    ${coord.code}
+                  </span>
+                  <div class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 bg-slate-900 text-white text-[10px] px-2 py-0.5 rounded whitespace-nowrap shadow">
+                    ${l.location}: ${displayVal}
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+          <div class="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1.5 max-h-24 overflow-y-auto">
+            ${sortedLocs.map(l => {
+              const val = metric === "units" ? l.units : (metric === "profit" ? (l.profit || 0) : l.revenue);
+              const displayVal = metric === "units" ? val.toLocaleString("en-IN") : "₹" + Math.round(val).toLocaleString("en-IN");
+              return `
+                <div class="p-1.5 bg-slate-50 border border-slate-200 rounded flex justify-between items-center text-[11px]">
+                  <span class="font-medium text-slate-800 truncate mr-1">${l.location}</span>
+                  <span class="font-semibold text-slate-900 text-[10px]">${displayVal}</span>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      `;
+    }
+    
     function renderCustomerRows(customers) {
       document.getElementById("customerTableBody").innerHTML = customers.map(c => `
         <tr onclick="inspectCustomer('${c.CustomerID}')" class="hover:bg-slate-50 cursor-pointer">
