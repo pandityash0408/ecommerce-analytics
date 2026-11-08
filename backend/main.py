@@ -381,6 +381,7 @@ def get_product_trends(
     granularity: str = "month",
     start_period: str = "",
     end_period: str = "",
+    country: str = "",
     products: list[str] = Query(default=[]),
     store: dict = Security(verify_api_key),
 ):
@@ -430,6 +431,9 @@ def get_product_trends(
   has_profit = cur.fetchone()[0] > 0
 
   placeholders = ",".join(["?"] * len(products))
+  country_sql = "AND Location = ?" if country.strip() else ""
+  query_params = [tenant_id] + list(products) + [active_start, active_end] + ([country.strip()] if country.strip() else [])
+
   query = f"""
         SELECT
             SUBSTR(InvoiceDate, 1, {date_len}) AS Period,
@@ -442,11 +446,11 @@ def get_product_trends(
           AND Product IN ({placeholders})
           AND SUBSTR(InvoiceDate, 1, {date_len}) >= ?
           AND SUBSTR(InvoiceDate, 1, {date_len}) <= ?
+          {country_sql}
         GROUP BY Period, Product
         ORDER BY Period ASC
     """
-  df = pd.read_sql_query(
-      query, conn, params=[tenant_id] + list(products) + [active_start, active_end]
+  df = pd.read_sql_query(query, conn, params=query_params
   )
   conn.close()
 
