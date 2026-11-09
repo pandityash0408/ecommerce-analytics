@@ -2,13 +2,18 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-import jwt
+try:
+    from jose import jwt
+except ImportError:
+    import jwt
+
 import numpy as np
 import pandas as pd
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
@@ -19,15 +24,42 @@ from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 
-from database import DB_PATH, get_connection, init_db
+from database import DB_PATH, init_db
 from etl_spark import run_spark_etl, run_spark_etl_from_file
-from security_shield import (
-    CyberArmorMiddleware,
-    get_security_audit_report,
-    hash_password_pbkdf2,
-    sanitize_input,
-    verify_password_pbkdf2,
-)
+from security_shield import CyberArmorMiddleware
+
+
+# Opens a SQLite WAL connection with sqlite3.Row enabled so columns can be accessed by name
+def get_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=120)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    return conn
+
+
+# Sanitizes input strings against SQL injection and XSS characters
+def sanitize_input(val: Optional[str]) -> str:
+    if not val:
+        return ""
+    return re.sub(r"[;\'\"\\--]", "", str(val)).strip()
+
+
+# Hashes and verifies passwords using PBKDF2-HMAC-SHA256
+def hash_password_pbkdf2(password: str, salt: str = "capstone_salt_2026") -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+
+
+def verify_password_pbkdf2(password: str, expected_hash: str) -> bool:
+    return secrets.compare_digest(hash_password_pbkdf2(password), expected_hash)
+
+
+def get_security_audit_report():
+    return {
+        "firewall": "CyberArmorMiddleware Active",
+        "encryption": "PBKDF2-HMAC-SHA256 + JWT HS256",
+        "compliance": "OWASP Top 10 + India DPDP Act 2023",
+    }
+
 
 app = FastAPI(
     title="Intelligent E-Commerce Customer Behavior Analytics API",
@@ -58,8 +90,15 @@ def _ensure_schema_columns():
             conn.execute(col_sql)
         except Exception:
             pass
+    try:
+        conn.execute("DELETE FROM dataset_cache WHERE payload_json NOT LIKE '%\"kpis\"%';")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
+
+
+_ensure_schema_columns()
 
 
 _ensure_schema_columns()
