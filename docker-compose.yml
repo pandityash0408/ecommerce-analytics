@@ -1,4 +1,4 @@
-# Multi-Container Stack: FastAPI Backend + Express.js Dashboard + Nginx HTTPS Reverse Proxy
+# Multi-Container Stack: FastAPI Backend + Express.js Dashboard + Nginx HTTPS + Cloudflare Tunnel
 services:
   backend:
     build: ./backend
@@ -31,6 +31,14 @@ services:
     depends_on:
       - frontend-web
       - backend
+    restart: always
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: ecommerce-cloudflare-tunnel
+    command: tunnel --no-autoupdate --url https://nginx:443 --no-tls-verify
+    depends_on:
+      - nginx
     restart: always
 
 volumes:
