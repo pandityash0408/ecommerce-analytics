@@ -1,0 +1,10 @@
+$kind: http-request
+name: Product Trends - Year-wise + Country (/products/trends)
+url: "{{base_url}}/products/trends?granularity=year&country=India"
+method: GET
+headers:
+  X-API-Key: "{{api_key}}"
+queryParams:
+  granularity: year
+  country: India
+order: 5000

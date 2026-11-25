@@ -1,0 +1,7 @@
+$kind: http-request
+name: Store Insights & KPIs (/store-insights)
+url: "{{base_url}}/store-insights"
+method: GET
+headers:
+  X-API-Key: "{{api_key}}"
+order: 3000

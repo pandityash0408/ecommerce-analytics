@@ -1,0 +1,10 @@
+$kind: http-request
+name: "Auth #5b: OAuth2 Auth Code Step 2 (/oauth/token)"
+url: "{{base_url}}/oauth/token"
+method: POST
+body:
+  type: urlencoded
+  content:
+    grant_type: authorization_code
+    code: "{{oauth_code}}"
+order: 5000

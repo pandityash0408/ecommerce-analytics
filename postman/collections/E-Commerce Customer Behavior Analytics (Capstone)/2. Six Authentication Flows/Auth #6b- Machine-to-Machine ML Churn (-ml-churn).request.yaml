@@ -1,0 +1,9 @@
+$kind: http-request
+name: "Auth #6b: Machine-to-Machine ML Churn (/ml/churn)"
+url: "{{base_url}}/ml/churn?tenant_id=store_a"
+method: GET
+headers:
+  Authorization: Bearer {{oauth_token}}
+queryParams:
+  tenant_id: store_a
+order: 7000

@@ -17,7 +17,23 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 # Initialize FastAPI application
-app = FastAPI(title="Enterprise E-Commerce Customer & Product Analytics API")
+# Initialize FastAPI application with full Swagger / OpenAPI 3.0 metadata
+OPENAPI_TAGS = [
+    {"name": "WebHooks", "description": "Outbound signed event webhooks & inbound GitHub HMAC-SHA256 webhook receiver."},
+]
+app = FastAPI(
+    title="Enterprise E-Commerce Customer & Product Analytics API",
+    version="2.0.0",
+    description=(
+        "Multi-Tenant E-Commerce BI Engine featuring **6 Authentication Flows** "
+        "(API Key, Basic Auth, Bearer, JWT, OAuth2 Auth Code, OAuth2 Client Credentials), "
+        "**Spark/Parquet ETL**, **RFM + Ranked K-Means ML**, **India DPDP Act 2023 Erasure**, "
+        "**OWASP CyberArmor Shield**, and **HMAC-Signed WebHooks**."
+    ),
+    openapi_tags=OPENAPI_TAGS,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 
 # Add CyberArmor OWASP security headers and rate limiting middleware
 app.add_middleware(CyberArmorMiddleware, max_requests_per_minute=300)
@@ -649,3 +665,143 @@ def get_security_audit_log():
 def test_sql_injection_shield(customer_query: str):
   clean_val = sanitize_identifier(customer_query, field_name="customer_query")
   return {"status": "Safe input accepted", "sanitized_value": clean_val}
+
+# =====================================================================
+# WEBHOOKS ENGINE (Outbound Signed Events + Inbound GitHub Receiver)
+# =====================================================================
+import hashlib
+import hmac
+import json
+import urllib.request
+from fastapi import Request
+from pydantic import BaseModel
+
+WEBHOOK_SECRET = "capstone-webhook-hmac-secret-2026"
+REGISTERED_WEBHOOKS = []
+WEBHOOK_DELIVERY_LOG = []
+
+
+class WebhookRegistration(BaseModel):
+  target_url: str
+  event_type: str = "dataset.uploaded"
+  description: str = "Capstone notification listener"
+
+
+# Signs a JSON payload using HMAC-SHA256 for secure webhook verification
+def sign_webhook_payload(payload_bytes: bytes) -> str:
+  digest = hmac.new(WEBHOOK_SECRET.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
+  return f"sha256={digest}"
+
+
+# Registers a new outbound webhook subscriber URL
+@app.post("/webhooks/register", tags=["WebHooks"], summary="Register a Webhook URL")
+def register_webhook(hook: WebhookRegistration):
+  entry = {
+      "id": f"wh_{secrets.token_hex(4)}",
+      "target_url": hook.target_url.strip(),
+      "event_type": hook.event_type.strip(),
+      "description": hook.description.strip(),
+      "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+  }
+  REGISTERED_WEBHOOKS.append(entry)
+  return {"status": "registered", "webhook": entry, "total_webhooks": len(REGISTERED_WEBHOOKS)}
+
+
+# Lists all registered webhooks and recent webhook delivery / GitHub event logs
+@app.get("/webhooks", tags=["WebHooks"], summary="List Webhooks & Delivery Logs")
+def list_webhooks():
+  return {
+      "registered_webhooks": REGISTERED_WEBHOOKS,
+      "recent_deliveries": WEBHOOK_DELIVERY_LOG[:25],
+  }
+
+
+# Fires a live HMAC-SHA256 signed test event to all matching registered webhooks
+@app.post("/webhooks/trigger-test", tags=["WebHooks"], summary="Trigger a Signed Test Webhook Event")
+def trigger_test_webhook(event_type: str = "dataset.uploaded", message: str = "New dataset indexed in Spark Lakehouse"):
+  payload = {
+      "event": event_type,
+      "message": message,
+      "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+      "source": "ecommerce-analytics-backend",
+  }
+  payload_bytes = json.dumps(payload).encode("utf-8")
+  signature = sign_webhook_payload(payload_bytes)
+
+  targets = [w for w in REGISTERED_WEBHOOKS if w["event_type"] in (event_type, "*")]
+  results = []
+  for hook in targets:
+    status_text = "DELIVERED"
+    try:
+      req = urllib.request.Request(
+          hook["target_url"],
+          data=payload_bytes,
+          headers={
+              "Content-Type": "application/json",
+              "X-Webhook-Event": event_type,
+              "X-Webhook-Signature": signature,
+          },
+          method="POST",
+      )
+      with urllib.request.urlopen(req, timeout=3) as resp:
+        status_text = f"HTTP {resp.status}"
+    except Exception as exc:
+      status_text = f"QUEUED / UNREACHABLE ({type(exc).__name__})"
+
+    record = {
+        "webhook_id": hook["id"],
+        "target_url": hook["target_url"],
+        "event": event_type,
+        "signature": signature,
+        "delivery_status": status_text,
+        "timestamp_utc": payload["timestamp_utc"],
+    }
+    WEBHOOK_DELIVERY_LOG.insert(0, record)
+    results.append(record)
+
+  if not targets:
+    record = {
+        "webhook_id": "local-audit",
+        "target_url": "internal://audit-log",
+        "event": event_type,
+        "signature": signature,
+        "delivery_status": "LOGGED (No external URL registered yet)",
+        "timestamp_utc": payload["timestamp_utc"],
+    }
+    WEBHOOK_DELIVERY_LOG.insert(0, record)
+    results.append(record)
+
+  return {"status": "dispatched", "signature": signature, "payload": payload, "deliveries": results}
+
+
+# Receives inbound GitHub repository webhooks (push / pull_request) with HMAC-SHA256 verification
+@app.post("/webhooks/github", tags=["WebHooks"], summary="Inbound GitHub Webhook Receiver")
+async def receive_github_webhook(request: Request):
+  raw_body = await request.body()
+  gh_event = request.headers.get("X-GitHub-Event", "ping")
+  gh_sig = request.headers.get("X-Hub-Signature-256", "")
+
+  verified = False
+  if gh_sig:
+    expected = sign_webhook_payload(raw_body)
+    verified = hmac.compare_digest(gh_sig, expected)
+
+  try:
+    body_json = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+  except Exception:
+    body_json = {}
+
+  repo_name = body_json.get("repository", {}).get("full_name", "pandityash0408/ecommerce-analytics")
+  pusher = body_json.get("pusher", {}).get("name", "github-user")
+
+  record = {
+      "webhook_id": "github-inbound",
+      "event": f"github.{gh_event}",
+      "repository": repo_name,
+      "pusher": pusher,
+      "hmac_verified": verified,
+      "delivery_status": "RECEIVED (200 OK)",
+      "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+  }
+  WEBHOOK_DELIVERY_LOG.insert(0, record)
+  return {"status": "received", "github_event": gh_event, "hmac_verified": verified, "record": record}

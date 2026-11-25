@@ -1,0 +1,15 @@
+$kind: http-request
+name: Simulate GitHub Push Webhook (/webhooks/github)
+url: "{{base_url}}/webhooks/github"
+method: POST
+headers:
+  Content-Type: application/json
+  X-GitHub-Event: push
+body:
+  type: text
+  content: |-
+    {
+      "repository": {"full_name": "pandityash0408/ecommerce-analytics"},
+      "pusher": {"name": "pandityash0408"}
+    }
+order: 3000

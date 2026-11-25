@@ -1,0 +1,7 @@
+$kind: http-request
+name: "Auth #3 & #4: Bearer JWT Access (/rfm-jwt)"
+url: "{{base_url}}/rfm-jwt"
+method: GET
+headers:
+  Authorization: Bearer {{jwt_token}}
+order: 3000

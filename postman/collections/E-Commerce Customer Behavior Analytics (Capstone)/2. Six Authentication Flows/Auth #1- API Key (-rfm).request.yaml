@@ -1,0 +1,7 @@
+$kind: http-request
+name: "Auth #1: API Key (/rfm)"
+url: "{{base_url}}/rfm"
+method: GET
+headers:
+  X-API-Key: key-store-a-123
+order: 1000

@@ -1,0 +1,9 @@
+$kind: http-request
+name: Product Trends - Month-wise (/products/trends)
+url: "{{base_url}}/products/trends?granularity=month"
+method: GET
+headers:
+  X-API-Key: "{{api_key}}"
+queryParams:
+  granularity: month
+order: 4000

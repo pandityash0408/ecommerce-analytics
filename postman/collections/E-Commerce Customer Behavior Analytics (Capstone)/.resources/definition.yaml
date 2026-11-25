@@ -1,0 +1,26 @@
+$kind: collection
+description: Complete Postman test suite for all 6 Auth Flows, Multi-Tenant Analytics, DPDP Privacy, OWASP SQLi Shield, and HMAC-Signed WebHooks.
+variables:
+  - key: base_url
+    value: http://localhost:8000
+    disabled: false
+    secret: false
+  - key: api_key
+    value: key-sample-sales
+    disabled: false
+    secret: false
+  - key: jwt_token
+    value: ""
+    disabled: false
+    secret: false
+  - key: oauth_code
+    value: ""
+    disabled: false
+    secret: false
+  - key: oauth_token
+    value: ""
+    disabled: false
+    secret: false
+  - key: auth_password_0zk2
+    secret: true
+    disabled: false

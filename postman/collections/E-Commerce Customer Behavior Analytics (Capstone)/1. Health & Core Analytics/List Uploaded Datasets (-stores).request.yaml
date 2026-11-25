@@ -1,0 +1,5 @@
+$kind: http-request
+name: List Uploaded Datasets (/stores)
+url: "{{base_url}}/stores"
+method: GET
+order: 2000

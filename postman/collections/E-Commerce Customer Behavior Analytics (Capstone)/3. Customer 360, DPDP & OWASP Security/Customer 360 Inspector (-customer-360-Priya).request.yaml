@@ -1,0 +1,7 @@
+$kind: http-request
+name: Customer 360 Inspector (/customer-360/Priya)
+url: "{{base_url}}/customer-360/Priya"
+method: GET
+headers:
+  X-API-Key: "{{api_key}}"
+order: 1000

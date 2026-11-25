@@ -1,0 +1,15 @@
+$kind: http-request
+name: Register Outbound Webhook (/webhooks/register)
+url: "{{base_url}}/webhooks/register"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "target_url": "https://webhook.site/your-unique-id",
+      "event_type": "dataset.uploaded",
+      "description": "Capstone Live Webhook Demo"
+    }
+order: 1000

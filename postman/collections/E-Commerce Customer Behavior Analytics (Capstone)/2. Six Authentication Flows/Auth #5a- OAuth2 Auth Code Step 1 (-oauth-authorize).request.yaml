@@ -1,0 +1,16 @@
+$kind: http-request
+name: "Auth #5a: OAuth2 Auth Code Step 1 (/oauth/authorize)"
+url: "{{base_url}}/oauth/authorize"
+method: POST
+body:
+  type: urlencoded
+  content:
+    username: alice
+    password: passwordA
+scripts:
+  - type: afterResponse
+    code: |-
+      var jsonData = pm.response.json();
+      if (jsonData.authorization_code) { pm.collectionVariables.set('oauth_code', jsonData.authorization_code); }
+    language: text/javascript
+order: 4000

@@ -1,0 +1,5 @@
+$kind: http-request
+name: Security Audit Log (/security/audit-log)
+url: "{{base_url}}/security/audit-log"
+method: GET
+order: 3000

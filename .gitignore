@@ -1,0 +1,12 @@
+# Database files & Parquet Data Lake (persisted in Docker volume instead of Git)
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
+backend/data_lake_hdfs/
+
+# Python, Node & Tool caches
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+.postman/

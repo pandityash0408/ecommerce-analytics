@@ -1,0 +1,8 @@
+$kind: http-request
+name: Trigger Signed Test Webhook (/webhooks/trigger-test)
+url: "{{base_url}}/webhooks/trigger-test?event_type=dataset.uploaded&message=Dataset+uploaded+from+Postman"
+method: POST
+queryParams:
+  event_type: dataset.uploaded
+  message: Dataset+uploaded+from+Postman
+order: 2000

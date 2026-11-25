@@ -1,0 +1,5 @@
+$kind: http-request
+name: List Webhooks & Delivery Logs (/webhooks)
+url: "{{base_url}}/webhooks"
+method: GET
+order: 4000

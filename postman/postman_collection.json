@@ -1,0 +1,248 @@
+{
+  "info": {
+    "name": "E-Commerce Customer Behavior Analytics (Capstone)",
+    "description": "Complete Postman test suite for all 6 Auth Flows, Multi-Tenant Analytics, DPDP Privacy, OWASP SQLi Shield, and HMAC-Signed WebHooks.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:8000", "type": "string"},
+    {"key": "api_key", "value": "key-sample-sales", "type": "string"},
+    {"key": "jwt_token", "value": "", "type": "string"},
+    {"key": "oauth_code", "value": "", "type": "string"},
+    {"key": "oauth_token", "value": "", "type": "string"}
+  ],
+  "item": [
+    {
+      "name": "1. Health & Core Analytics",
+      "item": [
+        {
+          "name": "Health Check (/hello)",
+          "request": {"method": "GET", "url": "{{base_url}}/hello"}
+        },
+        {
+          "name": "List Uploaded Datasets (/stores)",
+          "request": {"method": "GET", "url": "{{base_url}}/stores"}
+        },
+        {
+          "name": "Store Insights & KPIs (/store-insights)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "X-API-Key", "value": "{{api_key}}"}],
+            "url": "{{base_url}}/store-insights"
+          }
+        },
+        {
+          "name": "Product Trends - Month-wise (/products/trends)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "X-API-Key", "value": "{{api_key}}"}],
+            "url": "{{base_url}}/products/trends?granularity=month"
+          }
+        },
+        {
+          "name": "Product Trends - Year-wise + Country (/products/trends)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "X-API-Key", "value": "{{api_key}}"}],
+            "url": "{{base_url}}/products/trends?granularity=year&country=India"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Six Authentication Flows",
+      "item": [
+        {
+          "name": "Auth #1: API Key (/rfm)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "X-API-Key", "value": "key-store-a-123"}],
+            "url": "{{base_url}}/rfm"
+          }
+        },
+        {
+          "name": "Auth #2: Basic Auth -> Issue JWT (/login-basic)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access_token) { pm.collectionVariables.set('jwt_token', jsonData.access_token); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {"key": "username", "value": "alice", "type": "string"},
+                {"key": "password", "value": "passwordA", "type": "string"}
+              ]
+            },
+            "url": "{{base_url}}/login-basic"
+          }
+        },
+        {
+          "name": "Auth #3 & #4: Bearer JWT Access (/rfm-jwt)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+            "url": "{{base_url}}/rfm-jwt"
+          }
+        },
+        {
+          "name": "Auth #5a: OAuth2 Auth Code Step 1 (/oauth/authorize)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.authorization_code) { pm.collectionVariables.set('oauth_code', jsonData.authorization_code); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "username", "value": "alice", "type": "text"},
+                {"key": "password", "value": "passwordA", "type": "text"}
+              ]
+            },
+            "url": "{{base_url}}/oauth/authorize"
+          }
+        },
+        {
+          "name": "Auth #5b: OAuth2 Auth Code Step 2 (/oauth/token)",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "grant_type", "value": "authorization_code", "type": "text"},
+                {"key": "code", "value": "{{oauth_code}}", "type": "text"}
+              ]
+            },
+            "url": "{{base_url}}/oauth/token"
+          }
+        },
+        {
+          "name": "Auth #6a: OAuth2 Client Credentials (/oauth/token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access_token) { pm.collectionVariables.set('oauth_token', jsonData.access_token); }"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {"key": "grant_type", "value": "client_credentials", "type": "text"},
+                {"key": "client_id", "value": "analytics-robot", "type": "text"},
+                {"key": "client_secret", "value": "robot-secret-999", "type": "text"}
+              ]
+            },
+            "url": "{{base_url}}/oauth/token"
+          }
+        },
+        {
+          "name": "Auth #6b: Machine-to-Machine ML Churn (/ml/churn)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{oauth_token}}"}],
+            "url": "{{base_url}}/ml/churn?tenant_id=store_a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Customer 360, DPDP & OWASP Security",
+      "item": [
+        {
+          "name": "Customer 360 Inspector (/customer-360/Priya)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "X-API-Key", "value": "{{api_key}}"}],
+            "url": "{{base_url}}/customer-360/Priya"
+          }
+        },
+        {
+          "name": "SQL Injection Shield Test (Expect 400 Blocked)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/security/test-sqli?customer_query=' OR 1=1 --"
+          }
+        },
+        {
+          "name": "Security Audit Log (/security/audit-log)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/security/audit-log"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. WebHooks (Outbound & GitHub Inbound)",
+      "item": [
+        {
+          "name": "Register Outbound Webhook (/webhooks/register)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target_url\": \"https://webhook.site/your-unique-id\",\n  \"event_type\": \"dataset.uploaded\",\n  \"description\": \"Capstone Live Webhook Demo\"\n}"
+            },
+            "url": "{{base_url}}/webhooks/register"
+          }
+        },
+        {
+          "name": "Trigger Signed Test Webhook (/webhooks/trigger-test)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/webhooks/trigger-test?event_type=dataset.uploaded&message=Dataset+uploaded+from+Postman"
+          }
+        },
+        {
+          "name": "Simulate GitHub Push Webhook (/webhooks/github)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "X-GitHub-Event", "value": "push"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"repository\": {\"full_name\": \"pandityash0408/ecommerce-analytics\"},\n  \"pusher\": {\"name\": \"pandityash0408\"}\n}"
+            },
+            "url": "{{base_url}}/webhooks/github"
+          }
+        },
+        {
+          "name": "List Webhooks & Delivery Logs (/webhooks)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/webhooks"
+          }
+        }
+      ]
+    }
+  ]
+}
