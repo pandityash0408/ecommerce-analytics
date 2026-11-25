@@ -38,6 +38,9 @@
         Upload File(s)
         <input type="file" id="csvFileInput" multiple accept=".csv,.xlsx,.xls,.parquet,.json,.jsonl,.tsv,.txt,.xml,.zip,.gz" class="hidden" onchange="uploadUniversalCsv(event)" />
       </label>
+      <button onclick="logoutUser()" class="px-2.5 py-1.5 rounded border border-slate-300 hover:bg-slate-100 text-xs font-medium text-slate-700 transition">
+     Sign Out
+   </button>
     </div>
   </header>
 
@@ -908,6 +911,11 @@ window.currentLocations = data.locations || [];
       loadStoreData(0);
     }
 
+    // Clears the HttpOnly session cookie on the server and returns to the login page
+ async function logoutUser() {
+   await fetch("/auth/logout", { method: "POST" });
+   window.location.href = "/login";
+ }
     window.onload = () => refreshDatasetSidebar().then(() => loadStoreData(0));
   </script>
 </body>
