@@ -3,7 +3,7 @@ import secrets
 import sqlite3
 from database import DB_PATH, init_db
 from etl_spark import run_spark_etl, run_spark_etl_from_file
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Security, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 import jwt
@@ -63,46 +63,70 @@ API_KEYS = {
 
 
 # Validates X-API-Key against registered datasets in SQLite
-def verify_api_key(api_key: str = Security(api_key_header)):
+# Validates X-API-Key and enforces strict per-user ownership when X-User-Id is sent by the Express gateway
+def verify_api_key(
+    api_key: str = Security(api_key_header),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+):
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
   if api_key:
-    cur.execute("SELECT tenant_id, store_name FROM stores WHERE api_key = ?", (api_key,))
-    row = cur.fetchone()
+    try:
+      cur.execute("SELECT tenant_id, store_name, COALESCE(owner_id, 'yash') FROM stores WHERE api_key = ?", (api_key,))
+      row = cur.fetchone()
+    except sqlite3.OperationalError:
+      cur.execute("SELECT tenant_id, store_name, 'yash' FROM stores WHERE api_key = ?", (api_key,))
+      row = cur.fetchone()
     if row:
       conn.close()
-      return {"tenant_id": row[0], "store_name": row[1]}
+      if x_user_id and str(row[2]).strip().lower() != x_user_id.strip().lower():
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this dataset.")
+      return {"tenant_id": row[0], "store_name": row[1], "owner_id": row[2]}
     if api_key in API_KEYS:
       conn.close()
+      if x_user_id and x_user_id.strip().lower() != "yash":
+        raise HTTPException(status_code=403, detail="Forbidden: Dataset belongs to another user.")
       return API_KEYS[api_key]
   conn.close()
   raise HTTPException(status_code=401, detail="Guard #1 (API Key): Invalid or missing X-API-Key!")
 
 
-# Returns all uploaded datasets ordered from newest to oldest
+# Returns ONLY the logged-in user's uploaded datasets when X-User-Id is provided
 @app.get("/stores")
-def list_all_stores():
+def list_all_stores(x_user_id: str | None = Header(default=None, alias="X-User-Id")):
   conn = sqlite3.connect(DB_PATH, timeout=60)
-  df = pd.read_sql_query(
-      "SELECT tenant_id, store_name, api_key, created_at FROM stores ORDER BY created_at DESC",
-      conn,
-  )
+  if x_user_id:
+    df = pd.read_sql_query(
+        "SELECT tenant_id, store_name, api_key, created_at FROM stores WHERE LOWER(COALESCE(owner_id, 'yash')) = ? ORDER BY created_at DESC",
+        conn,
+        params=(x_user_id.strip().lower(),),
+    )
+  else:
+    df = pd.read_sql_query(
+        "SELECT tenant_id, store_name, api_key, created_at FROM stores ORDER BY created_at DESC",
+        conn,
+    )
   conn.close()
   return {"stores": df.to_dict(orient="records")}
 
 
-# Deletes an uploaded dataset and all of its sales rows when the user clicks 'x' in the left sidebar
+# Deletes an uploaded dataset ONLY if the logged-in user owns it
 @app.delete("/stores/{tenant_id}")
-def delete_store_dataset(tenant_id: str):
+def delete_store_dataset(tenant_id: str, x_user_id: str | None = Header(default=None, alias="X-User-Id")):
   tenant_id = sanitize_identifier(tenant_id, "tenant_id")
   conn = sqlite3.connect(DB_PATH, timeout=60)
   cur = conn.cursor()
+  if x_user_id:
+    cur.execute("SELECT COALESCE(owner_id, 'yash') FROM stores WHERE tenant_id = ?", (tenant_id,))
+    owner_row = cur.fetchone()
+    if owner_row and str(owner_row[0]).strip().lower() != x_user_id.strip().lower():
+      conn.close()
+      raise HTTPException(status_code=403, detail="Forbidden: Cannot delete another user's dataset.")
   cur.execute("DELETE FROM sales WHERE tenant_id = ?", (tenant_id,))
   cur.execute("DELETE FROM stores WHERE tenant_id = ?", (tenant_id,))
   conn.commit()
   conn.close()
   return {"status": "deleted", "tenant_id": tenant_id}
-
 
 # Guard #2: HTTP Basic Authentication configuration
 basic_security = HTTPBasic()
@@ -604,10 +628,15 @@ def predict_churn(tenant_id: str = "store_a", claims: dict = Security(verify_jwt
   return {"called_by_robot": claims["sub"], "auth_flow": claims.get("auth_flow"), "tenant_id": tenant_id, "predictions": rfm_list}
 
 
+# Uploads and indexes a dataset strictly under the authenticated user's owner_id
 @app.post("/etl/upload")
-def upload_sales_etl(file: UploadFile = File(...), store: dict = Security(verify_api_key)):
-  return run_spark_etl_from_file(file.file, tenant_id=store["tenant_id"], filename=file.filename)
-
+def upload_sales_etl(
+    file: UploadFile = File(...),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    api_key: str | None = Security(api_key_header),
+):
+  owner = x_user_id.strip().lower() if x_user_id else "yash"
+  return run_spark_etl_from_file(file.file, filename=file.filename, owner_id=owner)
 
 @app.get("/customer-360/{customer_id}")
 def get_customer_360(customer_id: str, store: dict = Security(verify_api_key)):

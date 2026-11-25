@@ -323,6 +323,12 @@
     function toggleSidebar() {
       document.getElementById("datasetSidebar").classList.toggle("hidden");
     }
+    // Clears the previous user's cached dataset key and logs out cleanly
+    async function logoutUser() {
+      localStorage.removeItem("lastActiveDatasetKey");
+      await fetch("/auth/logout", { method: "POST" });
+      window.location.href = "/login";
+    }
 
     document.addEventListener("click", (e) => {
       const box = document.getElementById("productSearchResults");
@@ -343,7 +349,7 @@
         if (preferredKey) {
           activeApiKey = preferredKey;
         } else if (!activeApiKey || !allStoresCache.some(s => s.api_key === activeApiKey)) {
-          activeApiKey = allStoresCache.length > 0 ? allStoresCache[0].api_key : "key-sample-sales";
+          activeApiKey = allStoresCache.length > 0 ? allStoresCache[0].api_key : "";
         }
         localStorage.setItem("lastActiveDatasetKey", activeApiKey);
         renderSidebarFiles(allStoresCache);
@@ -432,6 +438,25 @@
       try {
         // Always populate the left sidebar if it is still empty when the backend finishes waking up!
         if (!activeApiKey || allStoresCache.length === 0) await refreshDatasetSidebar();
+        // Show a clean private empty workspace for brand-new users who haven't uploaded a dataset yet
+   if (!activeApiKey) {
+     document.getElementById("activeFileName").innerText = "No dataset uploaded yet";
+     document.getElementById("kpiRevenue").innerText = "₹0";
+     document.getElementById("kpiOrdersSub").innerText = "Upload a CSV or Excel file to begin";
+     document.getElementById("kpiCustomers").innerText = "0";
+     document.getElementById("kpiRepeatRate").innerText = "0% repeat buyer rate";
+     document.getElementById("kpiAvgSpend").innerText = "₹0";
+     document.getElementById("kpiBestId").innerText = "—";
+     document.getElementById("kpiBestMeta").innerText = "₹0 • 0 units";
+     document.getElementById("kpiWorstId").innerText = "—";
+     document.getElementById("kpiWorstMeta").innerText = "₹0 • 0 units";
+     document.getElementById("topProductsBody").innerHTML = "";
+     document.getElementById("customerTableBody").innerHTML = "";
+     document.getElementById("segmentMatrixBody").innerHTML = "";
+     document.getElementById("selectedProductsChips").innerHTML = "";
+     if (productChartInstance) { productChartInstance.destroy(); productChartInstance = null; }
+     return;
+   }
         const res = await fetch("/api/insights", { headers: { "x-api-key": activeApiKey } });
         if (!res.ok) throw new Error("Backend starting");
         const data = await res.json();

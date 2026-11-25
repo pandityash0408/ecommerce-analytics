@@ -29,6 +29,12 @@ def init_db():
   # Safely add created_at column if upgrading from an older stores table
   try:
     cursor.execute("ALTER TABLE stores ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    
+  except sqlite3.OperationalError:
+    pass
+  # Safely add owner_id column so every uploaded dataset belongs strictly to the logged-in user
+  try:
+    cursor.execute("ALTER TABLE stores ADD COLUMN owner_id TEXT DEFAULT 'yash';")
   except sqlite3.OperationalError:
     pass
 

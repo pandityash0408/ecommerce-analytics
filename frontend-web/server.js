@@ -292,9 +292,17 @@ app.get("/index.html", requireAuth, (req, res) => {
 
 app.use("/api", requireAuth);
 
+// Helper that attaches the server-verified logged-in user (req.user.u) to every backend request
+function backendHeaders(req) {
+  return {
+    "X-API-Key": req.headers["x-api-key"] || "",
+    "X-User-Id": req.user.u,
+  };
+}
+
 app.get("/api/stores", async (req, res) => {
   try {
-    const response = await fetch(`${BACKEND_URL}/stores`);
+    const response = await fetch(`${BACKEND_URL}/stores`, { headers: backendHeaders(req) });
     res.status(response.status).json(await response.json());
   } catch (err) {
     res.status(500).json({ detail: err.message });
@@ -303,10 +311,7 @@ app.get("/api/stores", async (req, res) => {
 
 app.get("/api/insights", async (req, res) => {
   try {
-    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
-    const response = await fetch(`${BACKEND_URL}/store-insights`, {
-      headers: { "X-API-Key": apiKey },
-    });
+    const response = await fetch(`${BACKEND_URL}/store-insights`, { headers: backendHeaders(req) });
     res.status(response.status).json(await response.json());
   } catch (err) {
     res.status(500).json({ detail: err.message });
@@ -315,11 +320,8 @@ app.get("/api/insights", async (req, res) => {
 
 app.get("/api/products/search", async (req, res) => {
   try {
-    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
     const q = encodeURIComponent(req.query.q || "");
-    const response = await fetch(`${BACKEND_URL}/products/search?q=${q}`, {
-      headers: { "X-API-Key": apiKey },
-    });
+    const response = await fetch(`${BACKEND_URL}/products/search?q=${q}`, { headers: backendHeaders(req) });
     res.status(response.status).json(await response.json());
   } catch (err) {
     res.status(500).json({ detail: err.message });
@@ -328,11 +330,8 @@ app.get("/api/products/search", async (req, res) => {
 
 app.get("/api/products/trends", async (req, res) => {
   try {
-    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
     const rawQuery = req.originalUrl.includes("?") ? req.originalUrl.split("?")[1] : "";
-    const response = await fetch(`${BACKEND_URL}/products/trends?${rawQuery}`, {
-      headers: { "X-API-Key": apiKey },
-    });
+    const response = await fetch(`${BACKEND_URL}/products/trends?${rawQuery}`, { headers: backendHeaders(req) });
     res.status(response.status).json(await response.json());
   } catch (err) {
     res.status(500).json({ detail: err.message });
@@ -341,9 +340,8 @@ app.get("/api/products/trends", async (req, res) => {
 
 app.get("/api/customer-360/:id", async (req, res) => {
   try {
-    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
     const response = await fetch(`${BACKEND_URL}/customer-360/${encodeURIComponent(req.params.id)}`, {
-      headers: { "X-API-Key": apiKey },
+      headers: backendHeaders(req),
     });
     res.status(response.status).json(await response.json());
   } catch (err) {
@@ -353,10 +351,9 @@ app.get("/api/customer-360/:id", async (req, res) => {
 
 app.delete("/api/privacy/erase/:id", async (req, res) => {
   try {
-    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
     const response = await fetch(`${BACKEND_URL}/privacy/erase/${encodeURIComponent(req.params.id)}`, {
       method: "DELETE",
-      headers: { "X-API-Key": apiKey },
+      headers: backendHeaders(req),
     });
     res.status(response.status).json(await response.json());
   } catch (err) {
@@ -366,7 +363,6 @@ app.delete("/api/privacy/erase/:id", async (req, res) => {
 
 app.post("/api/etl-chunk", async (req, res) => {
   try {
-    const apiKey = req.headers["x-api-key"] || "key-sample-sales";
     const { filename, csvChunkText, fileBase64 } = req.body;
     const formData = new FormData();
 
@@ -379,7 +375,7 @@ app.post("/api/etl-chunk", async (req, res) => {
 
     const response = await fetch(`${BACKEND_URL}/etl/upload`, {
       method: "POST",
-      headers: { "X-API-Key": apiKey },
+      headers: backendHeaders(req),
       body: formData,
     });
     res.status(response.status).json(await response.json());
@@ -392,6 +388,7 @@ app.delete("/api/stores/:tenantId", async (req, res) => {
   try {
     const response = await fetch(`${BACKEND_URL}/stores/${encodeURIComponent(req.params.tenantId)}`, {
       method: "DELETE",
+      headers: backendHeaders(req),
     });
     res.status(response.status).json(await response.json());
   } catch (err) {

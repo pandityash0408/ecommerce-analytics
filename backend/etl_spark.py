@@ -52,11 +52,19 @@ COLUMN_SYNONYMS = {
 
 
 # Generates a clean dataset name and unique tenant_id directly from the uploaded file's name
-def detect_store_from_csv(first_chunk: pd.DataFrame, filename: str):
+# Generates a unique per-user tenant_id and api_key so different users uploading the same filename never overwrite each other
+def detect_store_from_csv(first_chunk: pd.DataFrame, filename: str, owner_id: str = "yash"):
+  import hashlib
   clean_filename = os.path.basename(filename or "dataset.csv").strip()
-  slug = re.sub(r"[^a-z0-9]+", "_", clean_filename.lower()).strip("_")[:32]
-  tenant_id = f"ds_{slug}"
-  api_key = f"key-{slug}"
+  slug = re.sub(r"[^a-z0-9]+", "_", clean_filename.lower()).strip("_")[:28]
+  owner_clean = (owner_id or "yash").strip().lower()
+  if owner_clean == "yash":
+    tenant_id = f"ds_{slug}"
+    api_key = f"key-{slug}"
+  else:
+    owner_tag = hashlib.sha256(owner_clean.encode("utf-8")).hexdigest()[:8]
+    tenant_id = f"ds_{owner_tag}_{slug}"
+    api_key = f"key-{owner_tag}-{slug}"
   return tenant_id, clean_filename, api_key
 
 
@@ -217,7 +225,7 @@ def _background_ingest_remaining_chunks(temp_path: str, filename: str, tenant_id
 
 
 # Loads the first 100k rows immediately (<2 seconds) so the UI updates right away, and streams the rest in background
-def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = None):
+def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = None, owner_id: str = "yash"):
   suffix = os.path.splitext(filename or "data.csv")[1] or ".csv"
   tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
   shutil.copyfileobj(file_obj, tmp)
@@ -244,12 +252,19 @@ def run_spark_etl_from_file(file_obj, tenant_id: str = None, filename: str = Non
     return {"status": "Empty dataset", "tenant_id": tenant_id, "store_name": filename, "api_key": "", "extract_raw_rows": 0, "transform_dirty_rows_removed": 0, "load_clean_rows_saved": 0}
 
   first_chunk.columns = [str(c).strip() for c in first_chunk.columns]
+  # Saves the uploaded dataset strictly under the logged-in user's owner_id
+  owner_clean = (owner_id or "yash").strip().lower()
+  try:
+    conn.execute("ALTER TABLE stores ADD COLUMN owner_id TEXT DEFAULT 'yash';")
+  except sqlite3.OperationalError:
+    pass
   if filename:
-    tenant_id, store_name, api_key = detect_store_from_csv(first_chunk, filename)
+    tenant_id, store_name, api_key = detect_store_from_csv(first_chunk, filename, owner_id=owner_clean)
     conn.execute(
-        "INSERT OR REPLACE INTO stores (tenant_id, store_name, api_key, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-        (tenant_id, store_name, api_key),
+        "INSERT OR REPLACE INTO stores (tenant_id, store_name, api_key, created_at, owner_id) VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)",
+        (tenant_id, store_name, api_key, owner_clean),
     )
+    conn.execute("DELETE FROM sales WHERE tenant_id = ?", (tenant_id,))
     conn.execute("DELETE FROM sales WHERE tenant_id = ?", (tenant_id,))
   else:
     store_name = tenant_id
