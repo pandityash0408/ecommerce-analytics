@@ -1,4 +1,4 @@
-# Automated Selenium End-to-End UI Test Suite for the E-Commerce Analytics Dashboard
+# Automated Selenium End-to-End UI Test Suite (Login Gate + Dashboard + Charts + Inspector)
 import os
 import time
 import pytest
@@ -30,11 +30,23 @@ def driver():
   browser.quit()
 
 
-# 1. Verify dashboard loads with correct title and non-zero KPI cards
-def test_dashboard_loads_and_shows_kpis(driver):
+# 1. Verify unauthenticated user is redirected to /login and can sign in cleanly
+def test_login_gate_and_authentication(driver):
   driver.get(BASE_URL)
+  wait = WebDriverWait(driver, 15)
+  wait.until(lambda d: "/login" in d.current_url or "Sign In" in d.title)
+  assert "Sign In" in driver.title
+
+  driver.find_element(By.ID, "username").send_keys("yash")
+  driver.find_element(By.ID, "password").send_keys("Yash@2026")
+  driver.find_element(By.ID, "submitBtn").click()
+
+  wait.until(lambda d: "Customer Behavior" in d.title)
   assert "Customer Behavior" in driver.title
 
+
+# 2. Verify dashboard loads with non-zero KPI cards after login
+def test_dashboard_loads_and_shows_kpis(driver):
   wait = WebDriverWait(driver, 15)
   wait.until(lambda d: d.find_element(By.ID, "activeFileName").text.strip() not in ("", "Loading dataset..."))
 
@@ -44,13 +56,13 @@ def test_dashboard_loads_and_shows_kpis(driver):
   assert cust_text != "0"
 
 
-# 2. Verify left dataset sidebar populates automatically on startup
+# 3. Verify left dataset sidebar populates automatically on startup
 def test_sidebar_datasets_populated(driver):
   count_val = int(driver.find_element(By.ID, "datasetCount").text.strip() or "0")
   assert count_val >= 1
 
 
-# 3. Verify switching Line Chart -> Bar Graph -> Map Graph works with zero blank states
+# 4. Verify switching Line Chart -> Bar Graph -> Map Graph works with zero blank states
 def test_chart_style_switching_line_bar_map(driver):
   style_select = Select(driver.find_element(By.ID, "chartStyleSelect"))
 
@@ -69,7 +81,7 @@ def test_chart_style_switching_line_bar_map(driver):
   assert driver.find_element(By.ID, "productTrendChart").is_displayed()
 
 
-# 4. Verify switching Month-wise -> Year-wise keeps From/To date dropdowns populated
+# 5. Verify switching Month-wise -> Year-wise keeps From/To date dropdowns populated
 def test_granularity_month_to_year_keeps_date_range(driver):
   gran_select = Select(driver.find_element(By.ID, "trendGranularity"))
   gran_select.select_by_value("year")
@@ -84,7 +96,7 @@ def test_granularity_month_to_year_keeps_date_range(driver):
   time.sleep(1)
 
 
-# 5. Verify Customer Segmentation Ledger & Account Inspector interaction
+# 6. Verify Customer Segmentation Ledger & Account Inspector interaction
 def test_customer_table_and_inspector(driver):
   rows = driver.find_elements(By.CSS_SELECTOR, "#customerTableBody tr")
   assert len(rows) >= 1
