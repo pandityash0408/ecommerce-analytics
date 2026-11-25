@@ -1,4 +1,16 @@
-# 1. Backend Deployment: Runs 2 load-balanced replicas of the FastAPI Kitchen container
+# 1. PersistentVolumeClaim: Persists SQLite WAL database & Parquet Data Lake across Pod restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ecommerce-sqlite-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+# 2. Backend Deployment: Runs 2 load-balanced replicas of FastAPI with Health Probes & Persistent Storage
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,10 +27,28 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ecommerce-backend:latest
+          image: ecommerce-analytics-backend:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
+          env:
+            - name: DB_DIR
+              value: "/app/data"
+          volumeMounts:
+            - name: sqlite-storage
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /hello
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /hello
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
           resources:
             requests:
               cpu: "100m"
@@ -26,8 +56,12 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+      volumes:
+        - name: sqlite-storage
+          persistentVolumeClaim:
+            claimName: ecommerce-sqlite-pvc
 ---
-# 2. Backend Service: Exposes FastAPI internally at http://backend:8000 and externally on NodePort 30800
+# 3. Backend Service: Exposes FastAPI internally at http://backend:8000 and externally on NodePort 30800
 apiVersion: v1
 kind: Service
 metadata:
@@ -42,7 +76,7 @@ spec:
       targetPort: 8000
       nodePort: 30800
 ---
-# 3. Frontend Deployment: Runs the Express.js Dark-Mode Website & API Gateway container
+# 4. Frontend Deployment: Runs 2 replicas of Express.js BI Dashboard with Readiness Probe
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -59,15 +93,21 @@ spec:
     spec:
       containers:
         - name: frontend-web
-          image: ecommerce-frontend-web:latest
+          image: ecommerce-analytics-frontend-web:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
           env:
             - name: BACKEND_URL
               value: "http://backend:8000"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
 ---
-# 4. Frontend Service: Exposes the Express.js Website to any browser on NodePort 30300
+# 5. Frontend Service: Exposes Express.js Website on NodePort 30300
 apiVersion: v1
 kind: Service
 metadata:
@@ -82,7 +122,7 @@ spec:
       targetPort: 3000
       nodePort: 30300
 ---
-# 5. Horizontal Pod Autoscaler (HPA): Automatically scales Backend Pods from 2 up to 5 under high CPU load
+# 6. Horizontal Pod Autoscaler (HPA): Auto-scales Backend Pods from 2 up to 5 under high CPU load
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -102,7 +142,7 @@ spec:
           type: Utilization
           averageUtilization: 70
 ---
-# 6. NetworkPolicy: Zero-trust firewall rule allowing traffic to Backend pods
+# 7. NetworkPolicy: Zero-trust firewall rule controlling traffic to Backend pods
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -114,7 +154,7 @@ spec:
   ingress:
     - {}
 ---
-# 7. Ingress with TLS: Routes HTTPS domain traffic to the Express.js Frontend Service
+# 8. Ingress with TLS: Routes HTTPS traffic to Frontend and Swagger/WebHooks to Backend
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -128,6 +168,20 @@ spec:
     - host: analytics.local
       http:
         paths:
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
+          - path: /webhooks
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 8000
           - path: /
             pathType: Prefix
             backend:

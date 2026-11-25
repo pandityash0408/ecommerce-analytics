@@ -125,9 +125,18 @@ class CyberArmorMiddleware(BaseHTTPMiddleware):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; frame-ancestors 'none';"
-    )
+    # Allows Swagger UI CDN scripts on /docs and /redoc while keeping strict CSP on all API endpoints
+    if request.url.path in ("/docs", "/redoc"):
+      response.headers["Content-Security-Policy"] = (
+          "default-src 'self' https://cdn.jsdelivr.net https://fastapi.tiangolo.com; "
+          "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+          "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+          "img-src 'self' data: https://fastapi.tiangolo.com;"
+      )
+    else:
+      response.headers["Content-Security-Policy"] = (
+          "default-src 'self'; frame-ancestors 'none';"
+      )
     response.headers["Strict-Transport-Security"] = (
         "max-age=31536000; includeSubDomains"
     )
