@@ -10,9 +10,8 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
 const SESSION_SECRET = process.env.SESSION_SECRET || "capstone-hmac-session-secret-2026-x9k2p7";
 const SESSION_COOKIE_NAME = "ecom_session";
-const SESSION_TTL_MS = 4 * 60 * 60 * 1000; // 4-hour session expiry
+const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
 
-// PBKDF2-HMAC-SHA256 password hashing (100,000 iterations)
 function hashPassword(password, salt) {
   return crypto.pbkdf2Sync(password, salt, 100000, 32, "sha256").toString("hex");
 }
@@ -23,31 +22,22 @@ function verifyPassword(password, salt, expectedHash) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
-// Authorized users (salted PBKDF2 hashes — never stored in plain text)
-// Authorized users with salted PBKDF2-SHA256 password hashes AND personal Recovery Key hashes
 const USERS = {
   yash: {
     salt: "salt_yash_cap_2026",
     hash: hashPassword(process.env.ADMIN_PASSWORD || "Yash@2026", "salt_yash_cap_2026"),
-    recoverySalt: "rec_yash_2026",
-    recoveryHash: hashPassword(process.env.RECOVERY_KEY || "CAPSTONE-2026-YASH", "rec_yash_2026"),
     role: "Administrator",
   },
   admin: {
     salt: "salt_admin_cap_2026",
     hash: hashPassword(process.env.ADMIN_PASSWORD || "Admin@2026", "salt_admin_cap_2026"),
-    recoverySalt: "rec_admin_2026",
-    recoveryHash: hashPassword(process.env.RECOVERY_KEY || "CAPSTONE-2026-ADMIN", "rec_admin_2026"),
     role: "Administrator",
   },
 };
 
-// Brute-force lockout & 5-minute one-time OTP store
 const failedLogins = new Map();
-const resetOtps = new Map();
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
-const OTP_TTL_MS = 5 * 60 * 1000;
 
 function checkBruteForce(ip) {
   const now = Date.now();
@@ -62,7 +52,6 @@ function recordFailedLogin(ip) {
   failedLogins.set(ip, attempts);
 }
 
-// HMAC-SHA256 signed session tokens
 function createSessionToken(username, role) {
   const payload = Buffer.from(
     JSON.stringify({ u: username, r: role, exp: Date.now() + SESSION_TTL_MS })
@@ -98,7 +87,6 @@ function parseCookies(cookieHeader = "") {
   return out;
 }
 
-// Blocks unauthenticated browsers (-> /login) and direct /api/* requests (-> 401)
 function requireAuth(req, res, next) {
   const cookies = parseCookies(req.headers.cookie);
   const session = verifySessionToken(cookies[SESSION_COOKIE_NAME]);
@@ -115,92 +103,174 @@ function requireAuth(req, res, next) {
 app.use(cors());
 app.use(express.json({ limit: "25mb" }));
 
-// Public Login Page & Auth Routes
 app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-// Step 1 of Verified Password Reset: Verify Recovery Key -> Issue Out-of-Band 6-Digit OTP in Server Console
-app.post("/auth/forgot-password", (req, res) => {
+app.post("/auth/login", (req, res) => {
   const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
   if (checkBruteForce(clientIp)) {
-    return res.status(429).json({ detail: "Too many failed attempts. Locked for 15 minutes." });
+    return res.status(429).json({ detail: "Too many failed login attempts. Locked for 15 minutes." });
   }
 
   const username = String(req.body?.username || "").trim().toLowerCase();
-  const recoveryKey = String(req.body?.recoveryKey || "").trim();
+  const password = String(req.body?.password || "");
   const user = USERS[username];
 
-  if (!user || !verifyPassword(recoveryKey, user.recoverySalt, user.recoveryHash)) {
+  if (!user || !verifyPassword(password, user.salt, user.hash)) {
     recordFailedLogin(clientIp);
-    return res.status(401).json({ detail: "Identity verification failed. Invalid username or Recovery Key." });
+    return res.status(401).json({ detail: "Invalid username or password." });
   }
 
-  const otp = String(crypto.randomInt(100000, 999999));
-  const otpSalt = crypto.randomBytes(16).toString("hex");
-  resetOtps.set(username, {
-    salt: otpSalt,
-    hash: hashPassword(otp, otpSalt),
-    expiresAt: Date.now() + OTP_TTL_MS,
-    attempts: 0,
+  failedLogins.delete(clientIp);
+  const token = createSessionToken(username, user.role);
+  const isHttps = req.headers["x-forwarded-proto"] === "https" || req.secure;
+  const cookieFlags = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+    isHttps ? "Secure" : "",
+  ].filter(Boolean).join("; ");
+
+  res.setHeader("Set-Cookie", cookieFlags);
+  return res.json({ status: "authenticated", username, role: user.role });
+});
+// =====================================================================
+// GOOGLE OAUTH 2.0 (Authorization Code Flow + PKCE S256 + CSRF State)
+// =====================================================================
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const OAUTH_STATE_COOKIE = "ecom_oauth_state";
+
+function signOAuthState(obj) {
+  const payload = Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const sig = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+function verifyOAuthState(token) {
+  if (!token || !token.includes(".")) return null;
+  const [payload, sig] = token.split(".");
+  const expected = crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return data.exp && Date.now() <= data.exp ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+// Step 1: Redirect browser to Google with cryptographic CSRF state + PKCE S256 challenge
+app.get("/auth/google", (req, res) => {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    return res.redirect("/login?error=Google+OAuth+is+not+configured+in+.env");
+  }
+  const proto = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const redirectUri = `${proto}://${host}/auth/google/callback`;
+
+  const state = crypto.randomBytes(24).toString("base64url");
+  const codeVerifier = crypto.randomBytes(32).toString("base64url");
+  const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+
+  const signedState = signOAuthState({
+    state,
+    codeVerifier,
+    redirectUri,
+    exp: Date.now() + 10 * 60 * 1000,
   });
 
-  console.log("=======================================================");
-  console.log(`[SECURITY OTP] Password Reset Code for '${username}': ${otp}`);
-  console.log("[SECURITY OTP] Valid for 5 minutes (one-time use only).");
-  console.log("=======================================================");
+  const isHttps = proto === "https";
+  res.setHeader(
+    "Set-Cookie",
+    [
+      `${OAUTH_STATE_COOKIE}=${encodeURIComponent(signedState)}`,
+      "Path=/",
+      "HttpOnly",
+      "SameSite=Lax",
+      "Max-Age=600",
+      isHttps ? "Secure" : "",
+    ].filter(Boolean).join("; ")
+  );
 
-  return res.json({
-    status: "otp_issued",
-    message: "Identity verified! Check your server terminal (docker logs ecommerce-express-web) for your 6-digit OTP.",
-  });
+  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
+  authUrl.searchParams.set("redirect_uri", redirectUri);
+  authUrl.searchParams.set("response_type", "code");
+  authUrl.searchParams.set("scope", "openid email profile");
+  authUrl.searchParams.set("state", state);
+  authUrl.searchParams.set("code_challenge", codeChallenge);
+  authUrl.searchParams.set("code_challenge_method", "S256");
+  authUrl.searchParams.set("prompt", "select_account");
+
+  return res.redirect(authUrl.toString());
 });
 
-// Step 2 of Verified Password Reset: Verify 6-Digit OTP + Enforce Strong Password Policy
-app.post("/auth/reset-password", (req, res) => {
-  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
-  if (checkBruteForce(clientIp)) {
-    return res.status(429).json({ detail: "Too many failed attempts. Locked for 15 minutes." });
-  }
+// Step 2: Verify CSRF state, exchange code + PKCE verifier server-side with Google, and issue HttpOnly session cookie
+app.get("/auth/google/callback", async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    const cookies = parseCookies(req.headers.cookie);
+    const saved = verifyOAuthState(cookies[OAUTH_STATE_COOKIE]);
 
-  const username = String(req.body?.username || "").trim().toLowerCase();
-  const otp = String(req.body?.otp || "").trim();
-  const newPassword = String(req.body?.newPassword || "");
+    if (!code || !state || !saved) {
+      return res.redirect("/login?error=Invalid+or+expired+Google+OAuth+state");
+    }
 
-  const user = USERS[username];
-  const record = resetOtps.get(username);
+    const a = Buffer.from(String(state));
+    const b = Buffer.from(String(saved.state));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.redirect("/login?error=CSRF+state+mismatch");
+    }
 
-  if (!user || !record) {
-    return res.status(400).json({ detail: "No active OTP found. Request a verification code first." });
-  }
-  if (Date.now() > record.expiresAt) {
-    resetOtps.delete(username);
-    return res.status(400).json({ detail: "OTP expired. Please request a new code." });
-  }
-  if (record.attempts >= 3) {
-    resetOtps.delete(username);
-    return res.status(429).json({ detail: "OTP invalidated after 3 wrong guesses. Request a new code." });
-  }
-  if (!verifyPassword(otp, record.salt, record.hash)) {
-    record.attempts += 1;
-    recordFailedLogin(clientIp);
-    return res.status(401).json({ detail: `Invalid 6-digit OTP (${3 - record.attempts} tries left).` });
-  }
-
-  const isStrong = newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword) && /[0-9]/.test(newPassword);
-  if (!isStrong) {
-    return res.status(400).json({
-      detail: "Password must be at least 8 characters and include uppercase, lowercase, and a number.",
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: String(code),
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: saved.redirectUri,
+        grant_type: "authorization_code",
+        code_verifier: saved.codeVerifier,
+      }),
     });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok || !tokenData.access_token) {
+      return res.redirect("/login?error=Google+token+exchange+failed");
+    }
+
+    const userRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+    const profile = await userRes.json();
+    if (!userRes.ok || !profile.email || !profile.email_verified) {
+      return res.redirect("/login?error=Unverified+Google+account");
+    }
+
+    const sessionToken = createSessionToken(profile.email, "Google OAuth User");
+    const isHttps = (req.headers["x-forwarded-proto"] || "") === "https" || req.secure;
+    res.setHeader("Set-Cookie", [
+      `${OAUTH_STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+      [
+        `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}`,
+        "Path=/",
+        "HttpOnly",
+        "SameSite=Lax",
+        `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+        isHttps ? "Secure" : "",
+      ].filter(Boolean).join("; "),
+    ]);
+
+    return res.redirect("/");
+  } catch (err) {
+    return res.redirect("/login?error=Google+sign-in+failed");
   }
-
-  const newSalt = crypto.randomBytes(16).toString("hex");
-  user.salt = newSalt;
-  user.hash = hashPassword(newPassword, newSalt);
-  resetOtps.delete(username);
-  failedLogins.delete(clientIp);
-
-  return res.json({ status: "password_updated", message: "Password updated securely. Sign in with your new password." });
 });
 
 app.post("/auth/logout", (req, res) => {
@@ -212,7 +282,6 @@ app.get("/auth/me", requireAuth, (req, res) => {
   res.json({ username: req.user.u, role: req.user.r });
 });
 
-// Protect the Dashboard HTML behind requireAuth
 app.get("/", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
@@ -221,7 +290,6 @@ app.get("/index.html", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// Protect EVERY /api/* route behind requireAuth
 app.use("/api", requireAuth);
 
 app.get("/api/stores", async (req, res) => {
@@ -296,7 +364,6 @@ app.delete("/api/privacy/erase/:id", async (req, res) => {
   }
 });
 
-// Forwards both text slices (CSV/TSV/JSON) and binary files (XLSX/Parquet/ZIP) losslessly to FastAPI
 app.post("/api/etl-chunk", async (req, res) => {
   try {
     const apiKey = req.headers["x-api-key"] || "key-sample-sales";
