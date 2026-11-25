@@ -91,12 +91,19 @@ app.delete("/api/privacy/erase/:id", async (req, res) => {
 });
 
 // Forwards 5MB file slices from browser to FastAPI backend over internal Docker network (zero CORS issues)
+// Forwards both text slices (CSV/TSV/JSON) and binary files (XLSX/Parquet/ZIP) losslessly to FastAPI
 app.post("/api/etl-chunk", async (req, res) => {
   try {
     const apiKey = req.headers["x-api-key"] || "key-sample-sales";
-    const { filename, csvChunkText } = req.body;
+    const { filename, csvChunkText, fileBase64 } = req.body;
     const formData = new FormData();
-    formData.append("file", new Blob([csvChunkText], { type: "text/csv" }), filename);
+
+    if (fileBase64) {
+      const binaryBuf = Buffer.from(fileBase64, "base64");
+      formData.append("file", new Blob([binaryBuf], { type: "application/octet-stream" }), filename);
+    } else {
+      formData.append("file", new Blob([csvChunkText || ""], { type: "text/csv" }), filename);
+    }
 
     const response = await fetch(`${BACKEND_URL}/etl/upload`, {
       method: "POST",
