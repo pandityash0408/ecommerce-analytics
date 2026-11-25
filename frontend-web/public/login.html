@@ -1,4 +1,4 @@
-<!-- Hardened Enterprise Login Page using PBKDF2-HMAC-SHA256 + HttpOnly SameSite=Strict Signed Cookies -->
+<!-- Enterprise Sign-In & 2-Factor Verified Password Reset Page -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,69 +13,142 @@
 </head>
 <body class="min-h-screen flex items-center justify-center p-4">
 
-  <div class="w-full max-w-sm bg-white border border-slate-200 rounded-lg shadow-sm p-7 space-y-6">
+  <div class="w-full max-w-sm bg-white border border-slate-200 rounded-lg shadow-sm p-7 space-y-5">
     <div class="space-y-1">
       <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">Enterprise BI Access</p>
-      <h1 class="text-lg font-bold text-slate-900 tracking-tight">E-Commerce Analytics</h1>
-      <p class="text-xs text-slate-500">Sign in with your authorized credentials to access the dashboard.</p>
+      <h1 id="pageTitle" class="text-lg font-bold text-slate-900 tracking-tight">E-Commerce Analytics</h1>
+      <p id="pageSub" class="text-xs text-slate-500">Sign in with your authorized credentials to access the dashboard.</p>
     </div>
 
     <div id="errorBox" class="hidden bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded px-3 py-2 font-medium"></div>
+    <div id="successBox" class="hidden bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded px-3 py-2 font-medium"></div>
 
+    <!-- VIEW 1: SIGN IN FORM -->
     <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4">
       <div>
         <label for="username" class="block text-xs font-semibold text-slate-700 mb-1">Username</label>
-        <input
-          id="username"
-          name="username"
-          type="text"
-          autocomplete="username"
-          required
-          placeholder="Enter username"
-          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900"
-        />
+        <input id="username" type="text" autocomplete="username" required placeholder="Enter username"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900" />
       </div>
 
       <div>
-        <label for="password" class="block text-xs font-semibold text-slate-700 mb-1">Password</label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autocomplete="current-password"
-          required
-          placeholder="Enter password"
-          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900"
-        />
+        <div class="flex items-center justify-between mb-1">
+          <label for="password" class="block text-xs font-semibold text-slate-700">Password</label>
+          <button type="button" onclick="showView('forgot')" class="text-[11px] font-medium text-slate-600 hover:text-slate-900 underline">
+            Forgot password?
+          </button>
+        </div>
+        <input id="password" type="password" autocomplete="current-password" required placeholder="Enter password"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900" />
       </div>
 
-      <button
-        id="submitBtn"
-        type="submit"
-        class="w-full py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded transition cursor-pointer"
-      >
+      <button id="submitBtn" type="submit"
+        class="w-full py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded transition cursor-pointer">
         Sign In
       </button>
     </form>
 
+    <!-- VIEW 2: STEP 1 - VERIFY IDENTITY (RECOVERY KEY -> GENERATE 6-DIGIT OTP) -->
+    <form id="forgotForm" onsubmit="handleForgot(event)" class="hidden space-y-4">
+      <div>
+        <label for="forgotUser" class="block text-xs font-semibold text-slate-700 mb-1">Username</label>
+        <input id="forgotUser" type="text" required placeholder="e.g. yash"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900" />
+      </div>
+
+      <div>
+        <label for="recoveryKey" class="block text-xs font-semibold text-slate-700 mb-1">Personal Recovery Key</label>
+        <input id="recoveryKey" type="password" required placeholder="Enter your recovery key"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900" />
+      </div>
+
+      <button type="submit"
+        class="w-full py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded transition cursor-pointer">
+        Verify Identity &amp; Send OTP
+      </button>
+      <button type="button" onclick="showView('login')" class="w-full text-center text-xs text-slate-500 hover:text-slate-900">
+        &larr; Back to Sign In
+      </button>
+    </form>
+
+    <!-- VIEW 3: STEP 2 - ENTER 6-DIGIT OTP & SET NEW PASSWORD -->
+    <form id="resetForm" onsubmit="handleReset(event)" class="hidden space-y-3.5">
+      <div>
+        <label for="otpInput" class="block text-xs font-semibold text-slate-700 mb-1">6-Digit Verification OTP</label>
+        <input id="otpInput" type="text" inputmode="numeric" maxlength="6" required placeholder="Check docker logs ecommerce-express-web"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900 tracking-widest font-mono" />
+      </div>
+
+      <div>
+        <label for="newPassword" class="block text-xs font-semibold text-slate-700 mb-1">New Password</label>
+        <input id="newPassword" type="password" required placeholder="Min 8 chars, upper, lower &amp; number"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900" />
+      </div>
+
+      <div>
+        <label for="confirmPassword" class="block text-xs font-semibold text-slate-700 mb-1">Confirm New Password</label>
+        <input id="confirmPassword" type="password" required placeholder="Re-enter new password"
+          class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded focus:outline-none focus:bg-white focus:border-slate-900" />
+      </div>
+
+      <button type="submit"
+        class="w-full py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded transition cursor-pointer">
+        Update Password
+      </button>
+      <button type="button" onclick="showView('login')" class="w-full text-center text-xs text-slate-500 hover:text-slate-900">
+        Cancel
+      </button>
+    </form>
+
     <div class="pt-3 border-t border-slate-100 text-[11px] text-slate-400 flex items-center justify-between">
-      <span>PBKDF2-SHA256 &bull; HttpOnly Session</span>
+      <span>PBKDF2-SHA256 &bull; 2FA Recovery</span>
       <span>TLS Protected</span>
     </div>
   </div>
 
   <script>
+    let pendingResetUser = "";
+
+    function clearMessages() {
+      document.getElementById("errorBox").classList.add("hidden");
+      document.getElementById("successBox").classList.add("hidden");
+    }
+
+    function showError(msg) {
+      const box = document.getElementById("errorBox");
+      box.innerText = msg;
+      box.classList.remove("hidden");
+    }
+
+    function showSuccess(msg) {
+      const box = document.getElementById("successBox");
+      box.innerText = msg;
+      box.classList.remove("hidden");
+    }
+
+    function showView(view) {
+      clearMessages();
+      document.getElementById("loginForm").classList.toggle("hidden", view !== "login");
+      document.getElementById("forgotForm").classList.toggle("hidden", view !== "forgot");
+      document.getElementById("resetForm").classList.toggle("hidden", view !== "reset");
+
+      if (view === "login") {
+        document.getElementById("pageTitle").innerText = "E-Commerce Analytics";
+        document.getElementById("pageSub").innerText = "Sign in with your authorized credentials to access the dashboard.";
+      } else if (view === "forgot") {
+        document.getElementById("pageTitle").innerText = "Verify Your Identity";
+        document.getElementById("pageSub").innerText = "Enter your username and personal Recovery Key to receive a one-time 6-digit OTP.";
+      } else {
+        document.getElementById("pageTitle").innerText = "Set New Password";
+        document.getElementById("pageSub").innerText = "Enter the 6-digit OTP printed in your server console and choose a strong new password.";
+      }
+    }
+
     async function handleLogin(e) {
       e.preventDefault();
-      const errBox = document.getElementById("errorBox");
-      const btn = document.getElementById("submitBtn");
-      errBox.classList.add("hidden");
-      btn.disabled = true;
-      btn.innerText = "Verifying...";
-
+      clearMessages();
       const username = document.getElementById("username").value.trim();
       const password = document.getElementById("password").value;
-
       try {
         const res = await fetch("/auth/login", {
           method: "POST",
@@ -83,18 +156,63 @@
           body: JSON.stringify({ username, password })
         });
         const data = await res.json();
+        if (res.ok) window.location.href = "/";
+        else showError(data.detail || "Invalid username or password.");
+      } catch {
+        showError("Unable to reach authentication server.");
+      }
+    }
+
+    async function handleForgot(e) {
+      e.preventDefault();
+      clearMessages();
+      pendingResetUser = document.getElementById("forgotUser").value.trim();
+      const recoveryKey = document.getElementById("recoveryKey").value.trim();
+      try {
+        const res = await fetch("/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: pendingResetUser, recoveryKey })
+        });
+        const data = await res.json();
         if (res.ok) {
-          window.location.href = "/";
+          showView("reset");
+          showSuccess(data.message);
         } else {
-          errBox.innerText = data.detail || "Invalid username or password.";
-          errBox.classList.remove("hidden");
+          showError(data.detail || "Identity verification failed.");
         }
-      } catch (err) {
-        errBox.innerText = "Unable to reach authentication server.";
-        errBox.classList.remove("hidden");
-      } finally {
-        btn.disabled = false;
-        btn.innerText = "Sign In";
+      } catch {
+        showError("Unable to reach authentication server.");
+      }
+    }
+
+    async function handleReset(e) {
+      e.preventDefault();
+      clearMessages();
+      const otp = document.getElementById("otpInput").value.trim();
+      const newPassword = document.getElementById("newPassword").value;
+      const confirmPassword = document.getElementById("confirmPassword").value;
+      if (newPassword !== confirmPassword) {
+        showError("Passwords do not match.");
+        return;
+      }
+      try {
+        const res = await fetch("/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: pendingResetUser, otp, newPassword })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showView("login");
+          showSuccess(data.message);
+          document.getElementById("username").value = pendingResetUser;
+          document.getElementById("password").value = "";
+        } else {
+          showError(data.detail || "Password reset failed.");
+        }
+      } catch {
+        showError("Unable to reach authentication server.");
       }
     }
   </script>

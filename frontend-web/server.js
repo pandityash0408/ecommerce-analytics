@@ -24,23 +24,30 @@ function verifyPassword(password, salt, expectedHash) {
 }
 
 // Authorized users (salted PBKDF2 hashes — never stored in plain text)
+// Authorized users with salted PBKDF2-SHA256 password hashes AND personal Recovery Key hashes
 const USERS = {
   yash: {
     salt: "salt_yash_cap_2026",
     hash: hashPassword(process.env.ADMIN_PASSWORD || "Yash@2026", "salt_yash_cap_2026"),
+    recoverySalt: "rec_yash_2026",
+    recoveryHash: hashPassword(process.env.RECOVERY_KEY || "CAPSTONE-2026-YASH", "rec_yash_2026"),
     role: "Administrator",
   },
   admin: {
     salt: "salt_admin_cap_2026",
     hash: hashPassword(process.env.ADMIN_PASSWORD || "Admin@2026", "salt_admin_cap_2026"),
+    recoverySalt: "rec_admin_2026",
+    recoveryHash: hashPassword(process.env.RECOVERY_KEY || "CAPSTONE-2026-ADMIN", "rec_admin_2026"),
     role: "Administrator",
   },
 };
 
-// Brute-force lockout: max 5 failed logins per IP within 15 minutes
+// Brute-force lockout & 5-minute one-time OTP store
 const failedLogins = new Map();
+const resetOtps = new Map();
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+const OTP_TTL_MS = 5 * 60 * 1000;
 
 function checkBruteForce(ip) {
   const now = Date.now();
@@ -113,37 +120,87 @@ app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-app.post("/auth/login", (req, res) => {
+// Step 1 of Verified Password Reset: Verify Recovery Key -> Issue Out-of-Band 6-Digit OTP in Server Console
+app.post("/auth/forgot-password", (req, res) => {
   const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
   if (checkBruteForce(clientIp)) {
-    return res.status(429).json({
-      detail: "Too many failed login attempts. Locked for 15 minutes.",
-    });
+    return res.status(429).json({ detail: "Too many failed attempts. Locked for 15 minutes." });
   }
 
   const username = String(req.body?.username || "").trim().toLowerCase();
-  const password = String(req.body?.password || "");
+  const recoveryKey = String(req.body?.recoveryKey || "").trim();
   const user = USERS[username];
 
-  if (!user || !verifyPassword(password, user.salt, user.hash)) {
+  if (!user || !verifyPassword(recoveryKey, user.recoverySalt, user.recoveryHash)) {
     recordFailedLogin(clientIp);
-    return res.status(401).json({ detail: "Invalid username or password." });
+    return res.status(401).json({ detail: "Identity verification failed. Invalid username or Recovery Key." });
   }
 
-  failedLogins.delete(clientIp);
-  const token = createSessionToken(username, user.role);
-  const isHttps = req.headers["x-forwarded-proto"] === "https" || req.secure;
-  const cookieFlags = [
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Strict",
-    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
-    isHttps ? "Secure" : "",
-  ].filter(Boolean).join("; ");
+  const otp = String(crypto.randomInt(100000, 999999));
+  const otpSalt = crypto.randomBytes(16).toString("hex");
+  resetOtps.set(username, {
+    salt: otpSalt,
+    hash: hashPassword(otp, otpSalt),
+    expiresAt: Date.now() + OTP_TTL_MS,
+    attempts: 0,
+  });
 
-  res.setHeader("Set-Cookie", cookieFlags);
-  return res.json({ status: "authenticated", username, role: user.role });
+  console.log("=======================================================");
+  console.log(`[SECURITY OTP] Password Reset Code for '${username}': ${otp}`);
+  console.log("[SECURITY OTP] Valid for 5 minutes (one-time use only).");
+  console.log("=======================================================");
+
+  return res.json({
+    status: "otp_issued",
+    message: "Identity verified! Check your server terminal (docker logs ecommerce-express-web) for your 6-digit OTP.",
+  });
+});
+
+// Step 2 of Verified Password Reset: Verify 6-Digit OTP + Enforce Strong Password Policy
+app.post("/auth/reset-password", (req, res) => {
+  const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+  if (checkBruteForce(clientIp)) {
+    return res.status(429).json({ detail: "Too many failed attempts. Locked for 15 minutes." });
+  }
+
+  const username = String(req.body?.username || "").trim().toLowerCase();
+  const otp = String(req.body?.otp || "").trim();
+  const newPassword = String(req.body?.newPassword || "");
+
+  const user = USERS[username];
+  const record = resetOtps.get(username);
+
+  if (!user || !record) {
+    return res.status(400).json({ detail: "No active OTP found. Request a verification code first." });
+  }
+  if (Date.now() > record.expiresAt) {
+    resetOtps.delete(username);
+    return res.status(400).json({ detail: "OTP expired. Please request a new code." });
+  }
+  if (record.attempts >= 3) {
+    resetOtps.delete(username);
+    return res.status(429).json({ detail: "OTP invalidated after 3 wrong guesses. Request a new code." });
+  }
+  if (!verifyPassword(otp, record.salt, record.hash)) {
+    record.attempts += 1;
+    recordFailedLogin(clientIp);
+    return res.status(401).json({ detail: `Invalid 6-digit OTP (${3 - record.attempts} tries left).` });
+  }
+
+  const isStrong = newPassword.length >= 8 && /[A-Z]/.test(newPassword) && /[a-z]/.test(newPassword) && /[0-9]/.test(newPassword);
+  if (!isStrong) {
+    return res.status(400).json({
+      detail: "Password must be at least 8 characters and include uppercase, lowercase, and a number.",
+    });
+  }
+
+  const newSalt = crypto.randomBytes(16).toString("hex");
+  user.salt = newSalt;
+  user.hash = hashPassword(newPassword, newSalt);
+  resetOtps.delete(username);
+  failedLogins.delete(clientIp);
+
+  return res.json({ status: "password_updated", message: "Password updated securely. Sign in with your new password." });
 });
 
 app.post("/auth/logout", (req, res) => {
