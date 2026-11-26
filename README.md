@@ -68,7 +68,7 @@ From the repository root, run:
 .\start.bat
 ```
 
-## API Documentation and Testing
+## API Documentation and testing
 
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
