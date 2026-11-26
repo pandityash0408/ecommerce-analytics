@@ -70,7 +70,7 @@ From the repository root, run:
 
 ## API Documentation and testing
 
-- Swagger UI: `http://localhost:8000/docs`
+- Swagger UI:`http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 - Postman collection: `postman/ecommerce-analytics.postman_collection.json`
 - Full endpoint and authentication guide: [`docs/API_AND_AUTH.md`](docs/API_AND_AUTH.md)
