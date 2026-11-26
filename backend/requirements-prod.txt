@@ -1,0 +1,27 @@
+# Production Requirements
+
+## Core Dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+pandas==2.2.2
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9  # PostgreSQL driver
+python-jose[cryptography]==3.3.0  # JWT
+passlib==1.7.4  # Password hashing
+python-multipart==0.0.6
+
+## Security & Performance
+python-dotenv==1.0.0
+redis==5.0.1  # For rate limiting cache
+pytest==8.1.1
+pytest-asyncio==0.21.2
+
+## Data Processing
+pyarrow==14.0.2  # Faster parquet
+numba==0.59.0  # Speed up pandas operations
+
+## Monitoring & Logging
+gunicorn==21.2.0
+prometheus-client==0.19.0
+opentelemetry-instrumentation-fastapi==0.45.0
